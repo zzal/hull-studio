@@ -1,1 +1,1 @@
-export const packageName = "@hull/studio";
+export { blueprintFileName, createStudioApp, type StudioApp, type StudioOptions } from "./app.js";

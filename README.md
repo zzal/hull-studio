@@ -37,6 +37,12 @@ vocabulary. The manifests declare the edges and
 Workspace packages export their TypeScript source under the `@hull/source`
 condition, so `pnpm test` and `pnpm typecheck` never need a prior build.
 
+`docs/schema/v0/hull.json` is the blueprint's JSON Schema, exported from the
+Zod model and snapshot-tested (`pnpm vitest -u` refreshes it after a model
+change). Until it is published at a public URL, `hull init` writes schema
+comment lines pointing at that file, which JetBrains and the YAML language
+server both accept.
+
 ## Developing
 
 Requires Node 22 or later and pnpm 10 (`corepack enable` picks the pinned

@@ -19,7 +19,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@hull/blueprint": "workspace:*",
     "@hull/catalog": "workspace:*",
-    "@hull/blueprint": "workspace:*"
+    "hono": "^4.13.7"
   }
 }

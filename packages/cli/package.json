@@ -5,7 +5,7 @@
   "description": "The hull binary: init, studio, deploy, destroy",
   "type": "module",
   "bin": {
-    "hull": "./dist/index.js"
+    "hull": "./dist/bin.js"
   },
   "exports": {
     ".": {
@@ -24,6 +24,10 @@
   "dependencies": {
     "@hull/blueprint": "workspace:*",
     "@hull/compiler": "workspace:*",
-    "@hull/studio": "workspace:*"
+    "@hull/studio": "workspace:*",
+    "citty": "^0.2.2"
+  },
+  "devDependencies": {
+    "yaml": "^2.9.1"
   }
 }
