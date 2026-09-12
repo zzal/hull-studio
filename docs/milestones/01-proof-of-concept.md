@@ -207,6 +207,13 @@ them.
    `prototype/yaml-round-trip` under `prototypes/yaml-round-trip/`.
 2. Automation API smoke test. Inline program that creates one S3 bucket
    with an S3 backend, `up` then `destroy`, from a TypeScript script.
+   **Done, 2026-09-12: passes.** About 20 s end to end including state
+   bucket bootstrap and teardown. The project backend URL overrides a
+   Pulumi Cloud login, `PulumiCommand.install()` covers users without the
+   CLI, and `onEvent` gives per-resource progress. Open decision: who
+   holds the passphrase for the secrets provider. Prototype and findings
+   on branch `prototype/pulumi-automation` under
+   `prototypes/pulumi-automation/`.
 
 Exit: both scripts work. If (1) fails on the `yaml` package, evaluate
 patching via `yaml` CST before considering any other format.
