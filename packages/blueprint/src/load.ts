@@ -2,6 +2,9 @@ import { parseDocument } from "yaml";
 import { blueprintSchema, type Blueprint } from "./model.js";
 import type { Vocabulary } from "./vocabulary.js";
 
+// The blueprint's file name at the root of the application repository.
+export const blueprintFileName = "hull.yaml";
+
 export type Diagnostic = {
   // Location in the blueprint, as YAML path segments. Empty for the whole file.
   path: (string | number)[];
@@ -42,6 +45,14 @@ export function loadBlueprint(text: string, vocabulary: Vocabulary): LoadResult 
     : { blueprint: parsed.data, diagnostics: [] };
 }
 
+// "X is not a <noun> of <scope>; <nouns> are a, b". Every vocabulary rule says
+// what is allowed, so a hand edit is fixable without guessing.
+function notAmong(value: string, noun: string, scope: string, allowed: readonly string[]): string {
+  const article = /^[aeiou]/.test(noun) ? "an" : "a";
+  const list = allowed.length > 0 ? `${noun}s are ${allowed.join(", ")}` : `${scope} has no ${noun}s`;
+  return `"${value}" is not ${article} ${noun} of ${scope}; ${list}`;
+}
+
 function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const intentNames = Object.keys(blueprint.intents);
@@ -57,7 +68,12 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
       unresolvable.add(name);
       diagnostics.push({
         path: ["intents", name, "resolution"],
-        message: `"${intent.resolution}" is not a candidate resolution for kind ${intent.kind} on provider ${blueprint.provider}; candidates are ${candidates.join(", ")}`,
+        message: notAmong(
+          intent.resolution,
+          "candidate resolution",
+          `kind ${intent.kind} on provider ${blueprint.provider}`,
+          candidates,
+        ),
       });
     }
 
@@ -67,7 +83,7 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
       if (!target) {
         diagnostics.push({
           path: ["intents", name, "links", index, "to"],
-          message: `"${link.to}" is not an intent of this blueprint; intents are ${intentNames.join(", ")}`,
+          message: notAmong(link.to, "intent", "this blueprint", intentNames),
         });
         return;
       }
@@ -75,7 +91,7 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
       if (!roles.includes(link.role)) {
         diagnostics.push({
           path: ["intents", name, "links", index, "role"],
-          message: `"${link.role}" is not a role of kind ${target.kind}; roles are ${roles.join(", ")}`,
+          message: notAmong(link.role, "link role", `kind ${target.kind}`, roles),
         });
       }
     });
@@ -87,7 +103,7 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
       if (!intent) {
         diagnostics.push({
           path: ["environments", environmentName, "overrides", intentName],
-          message: `"${intentName}" is not an intent of this blueprint; intents are ${intentNames.join(", ")}`,
+          message: notAmong(intentName, "intent", "this blueprint", intentNames),
         });
         continue;
       }
@@ -97,7 +113,7 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
         if (!parameters.includes(parameter)) {
           diagnostics.push({
             path: ["environments", environmentName, "overrides", intentName, parameter],
-            message: `"${parameter}" is not a sizing parameter of resolution ${intent.resolution}; parameters are ${parameters.join(", ")}`,
+            message: notAmong(parameter, "sizing parameter", `resolution ${intent.resolution}`, parameters),
           });
         }
       }

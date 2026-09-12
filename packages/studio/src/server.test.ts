@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LoadResult } from "@hull/blueprint";
 import { describe, expect, it } from "vitest";
-import { createStudioApp } from "./index.js";
+import { createStudioServer } from "./index.js";
 
 // Seam 1 from the milestone 1 spec: the studio HTTP API over a temporary
 // directory holding a blueprint, called in-process.
@@ -42,7 +42,7 @@ environments:
 async function readBlueprint(text: string) {
   const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
   writeFileSync(join(directory, "hull.yaml"), text);
-  const response = await createStudioApp({ directory }).request("/blueprint");
+  const response = await createStudioServer({ directory }).request("/blueprint");
   return { status: response.status, body: (await response.json()) as LoadResult };
 }
 
@@ -88,7 +88,7 @@ describe("GET /blueprint diagnostics", () => {
       {
         path: ["intents", "db", "resolution"],
         message:
-          '"lambda-api-gateway" is not a candidate resolution for kind relational-database on provider aws; candidates are rds-postgres',
+          '"lambda-api-gateway" is not a candidate resolution of kind relational-database on provider aws; candidate resolutions are rds-postgres',
       },
     ]);
   });
@@ -119,7 +119,7 @@ describe("GET /blueprint diagnostics", () => {
       {
         path: ["environments", "prod", "overrides", "db", "instanceType"],
         message:
-          '"instanceType" is not a sizing parameter of resolution rds-postgres; parameters are instanceClass, storageGb, multiAz',
+          '"instanceType" is not a sizing parameter of resolution rds-postgres; sizing parameters are instanceClass, storageGb, multiAz',
       },
     ]);
   });
@@ -147,18 +147,18 @@ describe("GET /blueprint diagnostics", () => {
     expect(body.diagnostics).toEqual([
       {
         path: ["intents", "admin", "links", 0, "role"],
-        message: '"read-write" is not a role of kind http-api; roles are ',
+        message: '"read-write" is not a link role of kind http-api; kind http-api has no link roles',
       },
     ]);
   });
 
-  it("rejects a role outside Hull's vocabulary", async () => {
+  it("rejects a link role the catalog does not define for the target kind", async () => {
     const { body } = await readBlueprint(validBlueprint.replace("role: read-write", "role: admin"));
 
     expect(body.diagnostics).toEqual([
       {
         path: ["intents", "api", "links", 0, "role"],
-        message: 'Invalid input: expected "read-write"',
+        message: '"admin" is not a link role of kind relational-database; link roles are read-write',
       },
     ]);
   });
@@ -179,7 +179,7 @@ describe("GET /blueprint diagnostics", () => {
 
     expect(body.blueprint).toBeNull();
     expect(body.diagnostics).toEqual([
-      { path: ["intents", "api", "entry"], message: "Invalid input: expected string, received undefined" },
+      { path: ["intents", "api", "entry"], message: "entry is required for an http-api intent" },
     ]);
   });
 
@@ -217,7 +217,7 @@ describe("GET /blueprint diagnostics", () => {
 
   it("answers 404 when the directory has no blueprint", async () => {
     const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
-    const response = await createStudioApp({ directory }).request("/blueprint");
+    const response = await createStudioServer({ directory }).request("/blueprint");
 
     expect(response.status).toBe(404);
     expect(await response.json()).toEqual({ error: `no hull.yaml in ${directory}` });

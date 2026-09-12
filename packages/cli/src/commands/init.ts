@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { blueprintSchemaUrl, sampleBlueprint } from "@hull/blueprint";
-import { blueprintFileName } from "@hull/studio";
+import { blueprintFileName, blueprintSchemaUrl } from "@hull/blueprint";
 import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
+import { sampleBlueprint } from "./sample.js";
 
 // Files under .hull that must never reach the repository: the generated
 // bindings and the deploy secrets passphrase. The deploy state file, also under

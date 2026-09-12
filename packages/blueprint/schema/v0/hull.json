@@ -4,7 +4,7 @@
   "properties": {
     "name": {
       "type": "string",
-      "pattern": "^[a-z][a-z0-9_]*$",
+      "minLength": 1,
       "description": "Application name."
     },
     "provider": {
@@ -78,9 +78,7 @@
                     },
                     "role": {
                       "type": "string",
-                      "enum": [
-                        "read-write"
-                      ],
+                      "minLength": 1,
                       "description": "How the tier uses the linked intent. Valid roles depend on the target intent's kind."
                     }
                   },
@@ -128,7 +126,7 @@
       "type": "object",
       "propertyNames": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9_]*$"
+        "minLength": 1
       },
       "additionalProperties": {
         "type": "object",

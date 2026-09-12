@@ -9,7 +9,7 @@ export function createHull(context: CommandContext) {
   return defineCommand({
     meta: {
       name: "hull",
-      description: "Declare what your application needs; Hull picks, prices and deploys the cloud resources",
+      description: "Declare what your application needs; Hull picks, estimates and deploys the cloud resources",
     },
     subCommands: {
       init: initCommand(context),

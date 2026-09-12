@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createStudioApp } from "@hull/studio";
+import { createStudioServer } from "@hull/studio";
 import { runCommand } from "citty";
 import { describe, expect, it } from "vitest";
 import { parseDocument } from "yaml";
@@ -11,7 +11,7 @@ import { createHull } from "./index.js";
 // Seam 2 from the milestone 1 spec: the CLI run in a temporary directory,
 // checked by the files it writes.
 
-const schemaUrl = pathToFileURL(resolve(import.meta.dirname, "../../../docs/schema/v0/hull.json")).href;
+const schemaUrl = pathToFileURL(resolve(import.meta.dirname, "../../blueprint/schema/v0/hull.json")).href;
 
 // The plan's sample blueprint (docs/milestones/01-proof-of-concept.md) in
 // canonical form, with the schema comments pointing at the committed schema.
@@ -74,7 +74,7 @@ describe("hull init", () => {
 
     await runInit(directory);
 
-    const response = await createStudioApp({ directory }).request("/blueprint");
+    const response = await createStudioServer({ directory }).request("/blueprint");
     const body = (await response.json()) as { blueprint: unknown; diagnostics: unknown[] };
     expect(body.diagnostics).toEqual([]);
     expect(body.blueprint).not.toBeNull();

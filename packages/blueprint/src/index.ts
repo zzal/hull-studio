@@ -1,4 +1,4 @@
-export { loadBlueprint, type Diagnostic, type LoadResult } from "./load.js";
+export { blueprintFileName, loadBlueprint, type Diagnostic, type LoadResult } from "./load.js";
 export {
   blueprintSchema,
   type Blueprint,
@@ -12,4 +12,3 @@ export {
 } from "./model.js";
 export type { Vocabulary } from "./vocabulary.js";
 export { blueprintJsonSchema, blueprintSchemaUrl } from "./schema.js";
-export { sampleBlueprint } from "./sample.js";

@@ -5,9 +5,14 @@ import { z } from "zod";
 // values, by definition, and are validated against the catalog vocabulary at
 // load time rather than enumerated here.
 
-const identifier = z
+// Intent names become environment variable prefixes (HULL_<INTENT>_...) in
+// the link contract, so they are limited to what a variable name accepts.
+const intentName = z
   .string()
-  .regex(/^[a-z][a-z0-9_]*$/, "must be lower-case letters, digits or underscores, starting with a letter");
+  .regex(
+    /^[a-z][a-z0-9_]*$/,
+    "intent names must be lower-case letters, digits or underscores, starting with a letter",
+  );
 
 function strictObject<T extends z.ZodRawShape>(shape: T) {
   const allowed = Object.keys(shape).join(", ");
@@ -27,8 +32,11 @@ export const intentKindSchema = z
   .describe("The architectural need this intent declares.");
 export type IntentKind = z.infer<typeof intentKindSchema>;
 
+// Roles are defined per intent kind by the catalog, not globally, so the model
+// only requires a name and the vocabulary check decides what the target accepts.
 export const roleSchema = z
-  .enum(["read-write"])
+  .string()
+  .min(1)
   .describe("How the tier uses the linked intent. Valid roles depend on the target intent's kind.");
 export type Role = z.infer<typeof roleSchema>;
 
@@ -43,7 +51,7 @@ export const usageProfileSchema = strictObject({
 export type UsageProfile = z.infer<typeof usageProfileSchema>;
 
 const linkSchema = strictObject({
-  to: identifier.describe("Name of the intent this tier is linked to."),
+  to: intentName.describe("Name of the intent this tier is linked to."),
   role: roleSchema,
 }).describe("A directional link from this tier to an intent, carrying a role.");
 export type Link = z.infer<typeof linkSchema>;
@@ -56,7 +64,10 @@ const resolution = z
 const httpApiSchema = strictObject({
   kind: z.literal("http-api"),
   resolution,
-  entry: z.string().min(1).describe("Path of the tier's entry module, relative to the blueprint."),
+  entry: z
+    .string({ error: (issue) => (issue.input === undefined ? "entry is required for an http-api intent" : undefined) })
+    .min(1)
+    .describe("Path of the tier's entry module, relative to the blueprint."),
   links: z.array(linkSchema).optional(),
 });
 
@@ -79,7 +90,7 @@ export const environmentSchema = strictObject({
     .describe("Usage profile values that replace the blueprint's for this environment."),
   policies: strictObject({}).optional().describe("Blueprint-wide policies. None exist in v0."),
   overrides: z
-    .record(identifier, z.record(z.string(), overrideValue))
+    .record(intentName, z.record(z.string(), overrideValue))
     .optional()
     .describe("Per-intent pins of sizing parameters, replacing the derived value."),
 }).describe(
@@ -88,13 +99,13 @@ export const environmentSchema = strictObject({
 export type Environment = z.infer<typeof environmentSchema>;
 
 export const blueprintSchema = strictObject({
-  name: identifier.describe("Application name."),
+  name: z.string().min(1).describe("Application name."),
   provider: providerSchema,
   region: z.string().min(1).describe("Provider region every environment deploys to."),
   usage: usageProfileSchema,
-  intents: z.record(identifier, intentSchema).describe("The intents of the application, by name."),
+  intents: z.record(intentName, intentSchema).describe("The intents of the application, by name."),
   environments: z
-    .record(identifier, environmentSchema)
+    .record(z.string().min(1), environmentSchema)
     .describe("The environments of the application, by name."),
 }).meta({ title: "Hull blueprint (v0)", description: "Declares an application's architecture as intents." });
 export type Blueprint = z.infer<typeof blueprintSchema>;
