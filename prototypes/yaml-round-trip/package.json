@@ -1,0 +1,18 @@
+{
+  "name": "prototype-yaml-round-trip",
+  "private": true,
+  "description": "PROTOTYPE, throwaway. Answers: does the yaml Document API round-trip hull.yaml with comments intact?",
+  "type": "module",
+  "scripts": {
+    "start": "tsx tui.ts",
+    "check": "tsx check.ts"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5"
+  }
+}
