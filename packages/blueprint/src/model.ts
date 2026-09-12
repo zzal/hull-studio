@@ -81,7 +81,10 @@ export const intentSchema = z
   .describe("An intent: an architectural need, with the resolution chosen for it.");
 export type Intent = z.infer<typeof intentSchema>;
 
-const overrideValue = z.union([z.string(), z.number(), z.boolean()]);
+// What a sizing parameter holds: an instance class name, a memory size, a
+// multi-AZ flag. Overrides pin values of the same shape.
+const sizingValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+export type SizingValue = z.infer<typeof sizingValueSchema>;
 
 export const environmentSchema = strictObject({
   usage: usageProfileSchema
@@ -90,7 +93,7 @@ export const environmentSchema = strictObject({
     .describe("Usage profile values that replace the blueprint's for this environment."),
   policies: strictObject({}).optional().describe("Blueprint-wide policies. None exist in v0."),
   overrides: z
-    .record(intentName, z.record(z.string(), overrideValue))
+    .record(intentName, z.record(z.string(), sizingValueSchema))
     .optional()
     .describe("Per-intent pins of sizing parameters, replacing the derived value."),
 }).describe(

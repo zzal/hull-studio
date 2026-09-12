@@ -1,0 +1,57 @@
+{
+  "provider": "aws",
+  "region": "us-east-1",
+  "currency": "USD",
+  "source": "hand-entered from the public AWS price pages; the refresh script against the Price List Bulk API lands with the pricing ticket",
+  "retrievedAt": "2026-09-12",
+  "hoursPerMonth": 730,
+  "lambda": {
+    "perMillionRequests": 0.2,
+    "perGbSecond": 1.66667e-05
+  },
+  "apiGateway": {
+    "http": {
+      "perMillionRequests": 1.0
+    }
+  },
+  "rds": {
+    "postgres": {
+      "instanceHour": {
+        "db.t4g.micro": 0.016,
+        "db.t4g.small": 0.032,
+        "db.t4g.medium": 0.065
+      },
+      "storageGbMonth": {
+        "gp3": 0.115
+      },
+      "multiAzFactor": 2
+    }
+  },
+  "secretsManager": {
+    "secretMonth": 0.4
+  },
+  "fargate": {
+    "vcpuHour": 0.04048,
+    "gbHour": 0.004445
+  },
+  "applicationLoadBalancer": {
+    "hour": 0.0225,
+    "lcuHour": 0.008
+  },
+  "freeTier": {
+    "label": "assumes classic free tier",
+    "note": "New AWS accounts moved to a credit-based free tier in July 2025. These are the classic allowances (always-free for Lambda, 12 months for the rest), account-wide, with the RDS hours and storage tied to one single-AZ instance of an eligible class; the pricing ticket must verify them before this label changes.",
+    "rdsEligibleInstanceClasses": [
+      "db.t4g.micro"
+    ],
+    "monthly": {
+      "lambdaMillionRequests": 1,
+      "lambdaGbSeconds": 400000,
+      "apiGatewayMillionRequests": 1,
+      "rdsInstanceHours": 750,
+      "rdsStorageGbMonths": 20,
+      "applicationLoadBalancerHours": 750,
+      "applicationLoadBalancerLcuHours": 15
+    }
+  }
+}

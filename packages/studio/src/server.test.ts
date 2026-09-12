@@ -1,50 +1,14 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LoadResult } from "@hull/blueprint";
 import { describe, expect, it } from "vitest";
 import { createStudioServer } from "./index.js";
+import { get, sampleBlueprint as validBlueprint } from "./testing.js";
 
-// Seam 1 from the milestone 1 spec: the studio HTTP API over a temporary
-// directory holding a blueprint, called in-process.
+// GET /blueprint: the model and the validation diagnostics of hull.yaml.
 
-const validBlueprint = `name: todos
-provider: aws
-region: us-east-1
-
-usage:
-  requestsPerMonth: 100000
-  storageGb: 1
-
-intents:
-  api:
-    kind: http-api
-    resolution: lambda-api-gateway
-    entry: src/api/index.ts
-    links:
-      - to: db
-        role: read-write
-
-  db:
-    kind: relational-database
-    resolution: rds-postgres
-
-environments:
-  dev: {}
-  prod:
-    usage:
-      requestsPerMonth: 2000000
-    overrides:
-      db:
-        instanceClass: db.t4g.small
-`;
-
-async function readBlueprint(text: string) {
-  const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
-  writeFileSync(join(directory, "hull.yaml"), text);
-  const response = await createStudioServer({ directory }).request("/blueprint");
-  return { status: response.status, body: (await response.json()) as LoadResult };
-}
+const readBlueprint = (text: string) => get<LoadResult>(text, "/blueprint");
 
 describe("GET /blueprint", () => {
   it("returns the model of a valid blueprint with no diagnostics", async () => {
@@ -120,6 +84,18 @@ describe("GET /blueprint diagnostics", () => {
         path: ["environments", "prod", "overrides", "db", "instanceType"],
         message:
           '"instanceType" is not a sizing parameter of resolution rds-postgres; sizing parameters are instanceClass, storageGb, multiAz',
+      },
+    ]);
+  });
+
+  it("rejects an override whose value is not the shape its sizing parameter takes", async () => {
+    const { body } = await readBlueprint(validBlueprint.replace("instanceClass: db.t4g.small", "multiAz: yes"));
+
+    expect(body.blueprint).toBeNull();
+    expect(body.diagnostics).toEqual([
+      {
+        path: ["environments", "prod", "overrides", "db", "multiAz"],
+        message: 'sizing parameter multiAz of resolution rds-postgres takes a boolean, not "yes"',
       },
     ]);
   });

@@ -1,6 +1,6 @@
 import { parseDocument } from "yaml";
 import { blueprintSchema, type Blueprint } from "./model.js";
-import type { Vocabulary } from "./vocabulary.js";
+import { sizingValueHasType, type Vocabulary } from "./vocabulary.js";
 
 // The blueprint's file name at the root of the application repository.
 export const blueprintFileName = "hull.yaml";
@@ -108,12 +108,19 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
         continue;
       }
       if (unresolvable.has(intentName)) continue;
-      const parameters = vocabulary.resolutions[intent.resolution]?.sizingParameters ?? [];
-      for (const parameter of Object.keys(overrides)) {
-        if (!parameters.includes(parameter)) {
+      const parameters = vocabulary.resolutions[intent.resolution]?.sizingParameters ?? {};
+      for (const [parameter, value] of Object.entries(overrides)) {
+        const path = ["environments", environmentName, "overrides", intentName, parameter];
+        const type = parameters[parameter];
+        if (type === undefined) {
           diagnostics.push({
-            path: ["environments", environmentName, "overrides", intentName, parameter],
-            message: notAmong(parameter, "sizing parameter", `resolution ${intent.resolution}`, parameters),
+            path,
+            message: notAmong(parameter, "sizing parameter", `resolution ${intent.resolution}`, Object.keys(parameters)),
+          });
+        } else if (!sizingValueHasType(value, type)) {
+          diagnostics.push({
+            path,
+            message: `sizing parameter ${parameter} of resolution ${intent.resolution} takes a ${type}, not ${JSON.stringify(value)}`,
           });
         }
       }

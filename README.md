@@ -43,6 +43,19 @@ exported from the Zod model, shipped with the package and snapshot-tested
 a public URL, `hull init` writes schema comment lines pointing at the installed
 file, which JetBrains and the YAML language server both accept.
 
+`packages/catalog/pricing/aws.json` is the pricing snapshot: hand-entered
+us-east-1 prices for the SKUs the three v0 resolutions use (including the
+Secrets Manager secret that holds the RDS managed master password), with the
+free tier allowances beside them as data. The allowances are one account-wide
+pool that the environment's intents draw from in blueprint order. Until the
+pricing ticket verifies the 2025 credit-based free tier, the estimate labels
+its free-tier figure "assumes classic free tier".
+
+The studio API serves `GET /blueprint` (model and diagnostics) and
+`GET /estimate?environment=<name>` (the blueprint merged for that environment,
+each sizing value marked derived or overridden, and the monthly low, expected
+and high figures per intent and in total, with and without free tier).
+
 ## Developing
 
 Requires Node 22 or later and pnpm 10 (`corepack enable` picks the pinned

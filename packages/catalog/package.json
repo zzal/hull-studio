@@ -12,13 +12,15 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "pricing"
   ],
   "scripts": {
     "build": "tsup && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@hull/blueprint": "workspace:*"
+    "@hull/blueprint": "workspace:*",
+    "zod": "^4.6.2"
   }
 }
