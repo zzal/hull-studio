@@ -1,0 +1,8 @@
+# JetBrains IDE project files (per-developer)
+.idea/
+
+# Claude Code "remember" plugin session memory (per-developer)
+.remember/
+
+# OS
+.DS_Store

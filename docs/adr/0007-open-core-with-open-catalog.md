@@ -1,0 +1,3 @@
+# Open core, with the catalog open
+
+CLI, studio, compiler, bindings, and the catalog (including recommendation rules and cost models) are open source under a permissive license. Anything that runs on Hull's servers (hosted studio, team history, observed-usage cost tracking, alerts) is the commercial layer. The line is: everything that touches the user's account or repo is open. The catalog is open because a recommendation is only trustworthy when the rule that produced it is readable, and a wrong cost model gets fixed faster by a pull request. "Closed catalog" (ADR 0003) means closed to new intents from outside, not closed to inspection or correction.

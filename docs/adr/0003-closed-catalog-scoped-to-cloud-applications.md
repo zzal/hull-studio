@@ -1,0 +1,3 @@
+# Closed catalog, scoped to cloud applications
+
+The catalog of intents is closed and curated by maintainers, and scoped to web and mobile application backends: not data pipelines, ML platforms, or network landing zones. Recommendations and cost estimates are only trustworthy when a human curated them, and trust is the product for developers who don't know the cloud. A raw-resource escape hatch, marked expert-only with no recommendation, covers the one thing every application needs that the catalog lacks. Intents are provider-agnostic by construction (no intent may name an AWS or GCP concept); AWS is the only provider in v1, with GCP as a later resolution set.
