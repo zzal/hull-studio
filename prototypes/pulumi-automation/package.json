@@ -1,0 +1,19 @@
+{
+  "name": "prototype-pulumi-automation",
+  "private": true,
+  "description": "PROTOTYPE, throwaway. Answers: can the Pulumi Automation API run an inline program against an S3 backend from a TS script, with progress events?",
+  "type": "module",
+  "scripts": {
+    "start": "tsx smoke.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.900.0",
+    "@aws-sdk/client-sts": "^3.900.0",
+    "@pulumi/aws": "^7.43.0",
+    "@pulumi/pulumi": "^3.190.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5"
+  }
+}
