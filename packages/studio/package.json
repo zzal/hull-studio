@@ -1,0 +1,25 @@
+{
+  "name": "@hull/studio",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local HTTP and WebSocket server over the blueprint, React dashboard",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@hull/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hull/catalog": "workspace:*",
+    "@hull/blueprint": "workspace:*"
+  }
+}

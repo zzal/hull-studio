@@ -1,0 +1,21 @@
+{
+  "name": "@hull/blueprint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "hull.yaml load and save with comments preserved, Zod model, JSON Schema export, environment resolution",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@hull/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  }
+}

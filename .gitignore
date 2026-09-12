@@ -9,3 +9,11 @@
 
 # Dependencies
 node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+coverage/
+
+# Hull working state written by the CLI (bindings, deploy state); never hand-edited
+.hull/

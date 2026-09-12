@@ -1,0 +1,24 @@
+{
+  "name": "@hull/catalog",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Intents, resolutions, sizing, cost models, pricing snapshot, recommendation rules",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@hull/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hull/blueprint": "workspace:*"
+  }
+}

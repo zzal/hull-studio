@@ -1,0 +1,25 @@
+{
+  "name": "@hull/compiler",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Resolved blueprint to Pulumi program, tier bundling, binding module and env-var contract",
+  "type": "module",
+  "exports": {
+    ".": {
+      "@hull/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hull/catalog": "workspace:*",
+    "@hull/blueprint": "workspace:*"
+  }
+}

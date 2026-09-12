@@ -297,7 +297,12 @@ escape hatch, GCP, hosted studio, IDE extension, observed-usage costs.
 These are implementation choices, not architecture; any can be swapped
 later without touching the glossary or the ADRs.
 
-- pnpm workspaces, Vitest, tsup for package builds.
+- pnpm workspaces, Vitest, tsup for package builds. Workspace packages
+  export their TypeScript source under the `@hull/source` condition, which
+  the base tsconfig and the Vitest config select, so tests and typechecks
+  never need a prior build; anything else resolving a workspace package
+  (a Vite client build, a bundler) must select the same condition or it
+  falls through to `dist`.
 - `yaml` (eemeli) for the round trip; Zod 4 for the model and schema.
 - Hono for the studio server, React + Vite + React Flow for the client.
 - `citty` for the CLI.
