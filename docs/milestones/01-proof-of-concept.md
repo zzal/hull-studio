@@ -199,6 +199,12 @@ them.
 1. Comment-preserving round trip. Load the sample blueprint above with the
    `yaml` package Document API, change `usage.requestsPerMonth` and
    `intents.api.resolution`, save. Diff must touch only those two lines.
+   **Done, 2026-09-12: passes with a hybrid.** Scalar edits on existing
+   keys are spliced by source range (byte-exact). Structural edits go
+   through the Document API, which normalizes comment spacing once on
+   hand-formatted files and is idempotent after that, so `hull init`
+   writes the canonical form. Prototype and full findings on branch
+   `prototype/yaml-round-trip` under `prototypes/yaml-round-trip/`.
 2. Automation API smoke test. Inline program that creates one S3 bucket
    with an S3 backend, `up` then `destroy`, from a TypeScript script.
 
