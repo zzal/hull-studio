@@ -297,7 +297,10 @@ escape hatch, GCP, hosted studio, IDE extension, observed-usage costs.
 These are implementation choices, not architecture; any can be swapped
 later without touching the glossary or the ADRs.
 
-- pnpm workspaces, Vitest, tsup for package builds. Workspace packages
+- pnpm workspaces, Vitest, tsup for the JavaScript bundles, TypeScript 7
+  (the native compiler, which has no JavaScript API) for typechecking and
+  for declaration emit, since tsup's own dts step needs the old API.
+  Workspace packages
   export their TypeScript source under the `@hull/source` condition, which
   the base tsconfig and the Vitest config select, so tests and typechecks
   never need a prior build; anything else resolving a workspace package

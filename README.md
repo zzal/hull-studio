@@ -16,8 +16,8 @@ only. Everything else in the glossary is later.
 
 ## Repository layout
 
-pnpm workspace, TypeScript everywhere, one `tsconfig.base.json`, Vitest for
-tests, tsup for package builds.
+pnpm workspace, TypeScript 7 everywhere, one `tsconfig.base.json`, Vitest for
+tests, tsup for the JavaScript bundles with declarations emitted by `tsc`.
 
 | Package | Owns | Must not know about |
 |---|---|---|
