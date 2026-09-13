@@ -20,5 +20,6 @@ export {
   type SizingValue,
   type UsageProfile,
 } from "./model.js";
+export { applyOps, opsSchema, PatchError, type Op } from "./patch.js";
 export type { SizingParameterType, Vocabulary } from "./vocabulary.js";
 export { blueprintJsonSchema, blueprintSchemaUrl } from "./schema.js";

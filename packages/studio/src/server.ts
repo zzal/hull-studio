@@ -1,9 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  applyOps,
   blueprintFileName,
   loadBlueprint,
   mergeEnvironment,
+  opsSchema,
+  PatchError,
   sizingValues,
   type Diagnostic,
   type LoadResult,
@@ -59,14 +62,44 @@ export function createStudioServer({ directory }: StudioOptions) {
 
   // Read on every request: the blueprint is the source of truth and the
   // developer's editor may have changed it since the last call.
-  function read(): LoadResult | undefined {
-    if (!existsSync(file)) return undefined;
-    return loadBlueprint(readFileSync(file, "utf8"), vocabulary);
+  function readText(): string | undefined {
+    return existsSync(file) ? readFileSync(file, "utf8") : undefined;
   }
+
+  function read(): LoadResult | undefined {
+    const text = readText();
+    return text === undefined ? undefined : loadBlueprint(text, vocabulary);
+  }
+
+  const missingBlueprint = (c: Context) => c.json({ error: `no ${blueprintFileName} in ${directory}` }, 404);
 
   app.get("/blueprint", (c) => {
     const loaded = read();
-    if (!loaded) return c.json({ error: `no ${blueprintFileName} in ${directory}` }, 404);
+    return loaded ? c.json(loaded) : missingBlueprint(c);
+  });
+
+  // PUT /blueprint with a list of operations: applied to the current text,
+  // the result validated, then written only if valid. The answer is what
+  // GET /blueprint would return afterwards.
+  app.put("/blueprint", async (c) => {
+    const current = readText();
+    if (current === undefined) return missingBlueprint(c);
+    const ops = opsSchema.safeParse(await c.req.json().catch(() => undefined));
+    if (!ops.success) return c.json({ error: "body must be a list of set and delete operations" }, 400);
+
+    let text: string;
+    try {
+      text = applyOps(current, ops.data);
+    } catch (error) {
+      if (error instanceof PatchError) return c.json({ error: error.message }, 400);
+      throw error;
+    }
+
+    const loaded = loadBlueprint(text, vocabulary);
+    if (!loaded.blueprint) {
+      return c.json({ error: `the patch makes ${blueprintFileName} invalid`, diagnostics: loaded.diagnostics }, 422);
+    }
+    writeFileSync(file, text);
     return c.json(loaded);
   });
 
@@ -78,7 +111,7 @@ export function createStudioServer({ directory }: StudioOptions) {
     if (!environmentName) return { response: c.json({ error: "environment query parameter is required" }, 400) };
 
     const loaded = read();
-    if (!loaded) return { response: c.json({ error: `no ${blueprintFileName} in ${directory}` }, 404) };
+    if (!loaded) return { response: missingBlueprint(c) };
     if (!loaded.blueprint) {
       return {
         response: c.json({ error: `${blueprintFileName} is not valid`, diagnostics: loaded.diagnostics }, 422),
