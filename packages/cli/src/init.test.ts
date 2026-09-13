@@ -50,9 +50,13 @@ environments:
         instanceClass: db.t4g.small
 `;
 
+const neverOpens = async () => {
+  throw new Error("init must not open a browser");
+};
+
 async function runInit(directory: string) {
   const lines: string[] = [];
-  await runCommand(createHull({ cwd: directory, output: (line) => lines.push(line) }), {
+  await runCommand(createHull({ cwd: directory, output: (line) => lines.push(line), openBrowser: neverOpens }), {
     rawArgs: ["init"],
   });
   return lines;

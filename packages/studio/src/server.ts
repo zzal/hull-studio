@@ -54,8 +54,8 @@ export type RecommendationsResponse = {
 
 export type ErrorResponse = { error: string; diagnostics?: Diagnostic[] };
 
-// The studio HTTP API over one blueprint directory. Server only; the
-// dashboard client lands with the dashboard ticket.
+// The studio HTTP API over one blueprint directory, as a Hono app so tests
+// call it in-process; startStudio serves it with the dashboard.
 export function createStudioServer({ directory }: StudioOptions) {
   const app = new Hono();
   const file = join(directory, blueprintFileName);

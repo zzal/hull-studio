@@ -41,11 +41,17 @@ environments:
         instanceClass: db.t4g.small
 `;
 
-// A studio server over a fresh temporary directory holding `text` as hull.yaml,
-// with the directory so a test can look at the file afterwards.
-export function studioDirectoryOver(text: string) {
+// A fresh temporary directory holding `text` as hull.yaml.
+export function blueprintDirectory(text: string) {
   const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
   writeFileSync(join(directory, "hull.yaml"), text);
+  return directory;
+}
+
+// A studio server over such a directory, with the directory so a test can
+// look at the file afterwards.
+export function studioDirectoryOver(text: string) {
+  const directory = blueprintDirectory(text);
   return { app: createStudioServer({ directory }), directory };
 }
 

@@ -1,10 +1,11 @@
 import { defineCommand } from "citty";
 import { initCommand } from "./commands/init.js";
+import { studioCommand } from "./commands/studio.js";
 import type { CommandContext } from "./context.js";
 
 export type { CommandContext } from "./context.js";
 
-// The `hull` command tree. `studio`, `deploy` and `destroy` land with their tickets.
+// The `hull` command tree. `deploy` and `destroy` land with their tickets.
 export function createHull(context: CommandContext) {
   return defineCommand({
     meta: {
@@ -13,6 +14,7 @@ export function createHull(context: CommandContext) {
     },
     subCommands: {
       init: initCommand(context),
+      studio: studioCommand(context),
     },
   });
 }
