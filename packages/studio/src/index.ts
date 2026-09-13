@@ -1,1 +1,1 @@
-export { createStudioServer, type ErrorResponse, type EstimateResponse, type StudioOptions } from "./server.js";
+export { createStudioServer, type ErrorResponse, type EstimateResponse, type RecommendationsResponse, type StudioOptions } from "./server.js";

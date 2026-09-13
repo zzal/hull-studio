@@ -1,8 +1,5 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createStudioServer, type ErrorResponse, type EstimateResponse } from "./index.js";
+import type { ErrorResponse, EstimateResponse } from "./index.js";
 import { get, sampleBlueprint } from "./testing.js";
 
 // GET /estimate?environment=<name>: the blueprint merged for that environment
@@ -217,40 +214,10 @@ describe("GET /estimate sizing derivation", () => {
   });
 });
 
+// Missing environment, unknown environment, invalid blueprint, missing file:
+// the answers every environment route shares are in environment-routes.test.ts.
 describe("GET /estimate errors", () => {
   const failing = (text: string, path: string) => get<ErrorResponse>(text, path);
-
-  it("requires an environment name", async () => {
-    const { status, body } = await failing(sampleBlueprint, "/estimate");
-
-    expect(status).toBe(400);
-    expect(body).toEqual({ error: "environment query parameter is required" });
-  });
-
-  it("names the environments when asked for one the blueprint does not declare", async () => {
-    const { status, body } = await failing(sampleBlueprint, "/estimate?environment=staging");
-
-    expect(status).toBe(404);
-    expect(body).toEqual({ error: 'no environment "staging" in hull.yaml; environments are dev, prod' });
-  });
-
-  it("reports the diagnostics of an invalid blueprint instead of an estimate", async () => {
-    const { status, body } = await failing(
-      sampleBlueprint.replace("instanceClass: db.t4g.small", "storageGb: plenty"),
-      "/estimate?environment=prod",
-    );
-
-    expect(status).toBe(422);
-    expect(body).toEqual({
-      error: "hull.yaml is not valid",
-      diagnostics: [
-        {
-          path: ["environments", "prod", "overrides", "db", "storageGb"],
-          message: 'sizing parameter storageGb of resolution rds-postgres takes a number, not "plenty"',
-        },
-      ],
-    });
-  });
 
   it("rejects an override outside the range its parameter accepts", async () => {
     const { status, body } = await failing(
@@ -273,13 +240,5 @@ describe("GET /estimate errors", () => {
       error:
         'no price in the aws us-east-1 snapshot for RDS instance class "db.r6g.large"; priced classes are db.t4g.micro, db.t4g.small, db.t4g.medium',
     });
-  });
-
-  it("answers 404 when the directory has no blueprint", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
-    const response = await createStudioServer({ directory }).request("/estimate?environment=dev");
-
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({ error: `no hull.yaml in ${directory}` });
   });
 });

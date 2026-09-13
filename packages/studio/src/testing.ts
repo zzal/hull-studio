@@ -40,11 +40,16 @@ environments:
         instanceClass: db.t4g.small
 `;
 
-// A studio server over a fresh temporary directory holding `text` as hull.yaml.
-export function studioOver(text: string) {
+// A studio server over a fresh temporary directory holding `text` as hull.yaml,
+// with the directory so a test can look at the file afterwards.
+export function studioDirectoryOver(text: string) {
   const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
   writeFileSync(join(directory, "hull.yaml"), text);
-  return createStudioServer({ directory });
+  return { app: createStudioServer({ directory }), directory };
+}
+
+export function studioOver(text: string) {
+  return studioDirectoryOver(text).app;
 }
 
 export async function get<T>(text: string, path: string) {

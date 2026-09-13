@@ -88,6 +88,16 @@ export function deriveSizing(resolution: string, usage: UsageProfile): Sizing {
   return resolutionNamed(resolution).derive(usage) as Sizing;
 }
 
+// The kind of a resolution and every candidate of that kind on the same
+// provider, each at its derived sizing for the profile, in catalog order.
+export function candidatesOf(resolution: string, usage: UsageProfile): { kind: IntentKind; candidates: SizedIntent[] } {
+  const { kind, provider } = resolutionNamed(resolution);
+  const candidates = Object.entries(resolutions)
+    .filter(([, definition]) => definition.kind === kind && definition.provider === provider)
+    .map(([name]) => ({ resolution: name, sizing: deriveSizing(name, usage) }));
+  return { kind, candidates };
+}
+
 export type MonthlyRange = Record<ScenarioName, number>;
 export type Estimate = { withoutFreeTier: MonthlyRange; withFreeTier: MonthlyRange };
 

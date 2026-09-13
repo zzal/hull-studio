@@ -7,11 +7,21 @@ import {
   sizingValues,
   type Diagnostic,
   type LoadResult,
+  type MergedBlueprint,
   type MergedSizing,
   type UsageProfile,
 } from "@hull/blueprint";
-import { CatalogError, deriveSizing, estimateEnvironment, pricing, vocabulary, type Estimate } from "@hull/catalog";
-import { Hono } from "hono";
+import {
+  CatalogError,
+  deriveSizing,
+  estimateEnvironment,
+  pricing,
+  recommendResolution,
+  vocabulary,
+  type Estimate,
+  type Recommendation,
+} from "@hull/catalog";
+import { Hono, type Context } from "hono";
 
 export type StudioOptions = {
   // Directory holding hull.yaml.
@@ -28,6 +38,15 @@ export type EstimateResponse = {
   freeTierLabel: string;
   intents: Record<string, { resolution: string; sizing: MergedSizing } & Estimate>;
   total: Estimate;
+};
+
+// GET /recommendations?environment=<name>: for every intent whose kind has
+// more than one candidate resolution, the candidates ranked at that
+// environment's usage profile with one reason per trade-off dimension.
+export type RecommendationsResponse = {
+  environment: string;
+  usage: UsageProfile;
+  intents: Record<string, Recommendation>;
 };
 
 export type ErrorResponse = { error: string; diagnostics?: Diagnostic[] };
@@ -51,33 +70,57 @@ export function createStudioServer({ directory }: StudioOptions) {
     return c.json(loaded);
   });
 
-  app.get("/estimate", (c) => {
+  // The blueprint merged for the environment named in the query, or the
+  // response explaining why there is none: every route over one environment
+  // answers the same way.
+  function mergedFor(c: Context): { merged: MergedBlueprint } | { response: Response } {
     const environmentName = c.req.query("environment");
-    if (!environmentName) return c.json({ error: "environment query parameter is required" }, 400);
+    if (!environmentName) return { response: c.json({ error: "environment query parameter is required" }, 400) };
 
     const loaded = read();
-    if (!loaded) return c.json({ error: `no ${blueprintFileName} in ${directory}` }, 404);
+    if (!loaded) return { response: c.json({ error: `no ${blueprintFileName} in ${directory}` }, 404) };
     if (!loaded.blueprint) {
-      return c.json({ error: `${blueprintFileName} is not valid`, diagnostics: loaded.diagnostics }, 422);
+      return {
+        response: c.json({ error: `${blueprintFileName} is not valid`, diagnostics: loaded.diagnostics }, 422),
+      };
     }
 
     const merged = mergeEnvironment(loaded.blueprint, environmentName, deriveSizing);
     if (!merged) {
       const names = Object.keys(loaded.blueprint.environments).join(", ");
-      return c.json(
-        { error: `no environment "${environmentName}" in ${blueprintFileName}; environments are ${names}` },
-        404,
-      );
+      return {
+        response: c.json(
+          { error: `no environment "${environmentName}" in ${blueprintFileName}; environments are ${names}` },
+          404,
+        ),
+      };
     }
+    return { merged };
+  }
+
+  // The catalog's diagnostic for a rule the blueprint's content breaks;
+  // anything else is a bug and propagates.
+  function catalogResponse(c: Context, error: unknown): Response {
+    if (error instanceof CatalogError) return c.json({ error: error.message }, 422);
+    throw error;
+  }
+
+  function sizedIntents(merged: MergedBlueprint) {
+    return Object.fromEntries(
+      Object.entries(merged.intents).map(([name, intent]) => [
+        name,
+        { resolution: intent.resolution, sizing: sizingValues(intent.sizing) },
+      ]),
+    );
+  }
+
+  app.get("/estimate", (c) => {
+    const found = mergedFor(c);
+    if ("response" in found) return found.response;
+    const { merged } = found;
 
     try {
-      const sized = Object.fromEntries(
-        Object.entries(merged.intents).map(([name, intent]) => [
-          name,
-          { resolution: intent.resolution, sizing: sizingValues(intent.sizing) },
-        ]),
-      );
-      const estimated = estimateEnvironment(sized, merged.usage, pricing);
+      const estimated = estimateEnvironment(sizedIntents(merged), merged.usage, pricing);
       const response: EstimateResponse = {
         environment: merged.environment,
         usage: merged.usage,
@@ -92,8 +135,25 @@ export function createStudioServer({ directory }: StudioOptions) {
       };
       return c.json(response);
     } catch (error) {
-      if (error instanceof CatalogError) return c.json({ error: error.message }, 422);
-      throw error;
+      return catalogResponse(c, error);
+    }
+  });
+
+  app.get("/recommendations", (c) => {
+    const found = mergedFor(c);
+    if ("response" in found) return found.response;
+    const { merged } = found;
+
+    try {
+      const intents: Record<string, Recommendation> = {};
+      for (const [name, sized] of Object.entries(sizedIntents(merged))) {
+        const recommendation = recommendResolution(sized, merged.usage, pricing);
+        if (recommendation) intents[name] = recommendation;
+      }
+      const response: RecommendationsResponse = { environment: merged.environment, usage: merged.usage, intents };
+      return c.json(response);
+    } catch (error) {
+      return catalogResponse(c, error);
     }
   });
 
