@@ -3,7 +3,7 @@ import type { ProviderAccount } from "./engine.js";
 
 // The AWS profile the SDK and the Pulumi CLI both read; unset means the
 // default one.
-export const ambientProfile = () => process.env.AWS_PROFILE;
+export const ambientProfile = () => process.env.AWS_PROFILE || undefined;
 
 // The developer's AWS account through the SDK, with credentials from the
 // ambient profile. Loaded on first use, like the engine.

@@ -17,3 +17,6 @@ coverage/
 
 # Hull working state written by the CLI (bindings, deploy state); never hand-edited
 .hull/
+
+# Per-developer environment (direnv); holds AWS credentials, never committed
+.envrc
