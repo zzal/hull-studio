@@ -2,29 +2,40 @@
   "provider": "aws",
   "region": "us-east-1",
   "currency": "USD",
-  "source": "hand-entered from the public AWS price pages; the refresh script against the Price List Bulk API lands with the pricing ticket",
-  "retrievedAt": "2026-09-12",
+  "source": "AWS Price List Bulk API, current offer files for us-east-1: AWSLambda 20260911173510, AmazonApiGateway 20260911124408, AmazonRDS 20260911124502, AWSSecretsManager 20260911124610, AmazonECS 20260911124425, AWSELB 20260911124544",
+  "publishedAt": "2026-09-11T17:35:10Z",
   "hoursPerMonth": 730,
   "lambda": {
     "perMillionRequests": 0.2,
-    "perGbSecond": 1.66667e-05
+    "perGbSecond": 0.0000166667
   },
   "apiGateway": {
     "http": {
-      "perMillionRequests": 1.0
+      "perMillionRequests": 1
     }
   },
   "rds": {
     "postgres": {
       "instanceHour": {
-        "db.t4g.micro": 0.016,
-        "db.t4g.small": 0.032,
-        "db.t4g.medium": 0.065
+        "db.t4g.micro": {
+          "singleAz": 0.016,
+          "multiAz": 0.032
+        },
+        "db.t4g.small": {
+          "singleAz": 0.032,
+          "multiAz": 0.065
+        },
+        "db.t4g.medium": {
+          "singleAz": 0.065,
+          "multiAz": 0.129
+        }
       },
       "storageGbMonth": {
-        "gp3": 0.115
-      },
-      "multiAzFactor": 2
+        "gp3": {
+          "singleAz": 0.115,
+          "multiAz": 0.23
+        }
+      }
     }
   },
   "secretsManager": {
@@ -39,19 +50,26 @@
     "lcuHour": 0.008
   },
   "freeTier": {
-    "label": "assumes classic free tier",
-    "note": "New AWS accounts moved to a credit-based free tier in July 2025. These are the classic allowances (always-free for Lambda, 12 months for the rest), account-wide, with the RDS hours and storage tied to one single-AZ instance of an eligible class; the pricing ticket must verify them before this label changes.",
-    "rdsEligibleInstanceClasses": [
-      "db.t4g.micro"
+    "label": "always-free allowances only",
+    "note": "Every account, on the free or the paid plan, gets the always-free monthly allowances; of the SKUs here only Lambda's requests and GB-seconds have one. The 12-month allowances (API Gateway requests, RDS instance hours and storage, load balancer hours and capacity units) closed to accounts opened on or after July 15, 2025, and the last accounts holding them aged out on July 15, 2026. The sign-up credits of new accounts (USD 100, up to 200) are not per-service allowances and are not modelled. Verification in packages/catalog/README.md.",
+    "verifiedAt": "2026-09-14",
+    "sources": [
+      "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/",
+      "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier.html",
+      "https://aws.amazon.com/free/",
+      "https://aws.amazon.com/free/terms/",
+      "https://aws.amazon.com/free/free-tier-faqs/",
+      "https://aws.amazon.com/lambda/pricing/"
     ],
+    "rdsEligibleInstanceClasses": [],
     "monthly": {
       "lambdaMillionRequests": 1,
       "lambdaGbSeconds": 400000,
-      "apiGatewayMillionRequests": 1,
-      "rdsInstanceHours": 750,
-      "rdsStorageGbMonths": 20,
-      "applicationLoadBalancerHours": 750,
-      "applicationLoadBalancerLcuHours": 15
+      "apiGatewayMillionRequests": 0,
+      "rdsInstanceHours": 0,
+      "rdsStorageGbMonths": 0,
+      "applicationLoadBalancerHours": 0,
+      "applicationLoadBalancerLcuHours": 0
     }
   }
 }

@@ -43,13 +43,18 @@ exported from the Zod model, shipped with the package and snapshot-tested
 a public URL, `hull init` writes schema comment lines pointing at the installed
 file, which JetBrains and the YAML language server both accept.
 
-`packages/catalog/pricing/aws.json` is the pricing snapshot: hand-entered
-us-east-1 prices for the SKUs the three v0 resolutions use (including the
-Secrets Manager secret that holds the RDS managed master password), with the
-free tier allowances beside them as data. The allowances are one account-wide
-pool that the environment's intents draw from in blueprint order. Until the
-pricing ticket verifies the 2025 credit-based free tier, the estimate labels
-its free-tier figure "assumes classic free tier".
+`packages/catalog/pricing/aws.json` is the pricing snapshot: the us-east-1
+on-demand prices of exactly the sixteen SKUs the three v0 resolutions use
+(including the Secrets Manager secret that holds the RDS managed master
+password), refreshed from the AWS Price List Bulk API by
+`pnpm -F @hull/catalog refresh-pricing`, with the free tier rules beside them
+as data. The rules are verified by hand and dated in the file; the write-up
+of the 2025 change to a credit-based free tier is in
+`packages/catalog/README.md`. What is left for every account is the
+always-free allowances, and of these SKUs only Lambda has one, so the
+estimate's free-tier figure is labelled "always-free allowances only". The
+allowances are one account-wide pool that the environment's intents draw
+from in blueprint order.
 
 The studio API serves `GET /blueprint` (model and diagnostics) and
 `GET /estimate?environment=<name>` (the blueprint merged for that environment,

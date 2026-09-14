@@ -56,13 +56,13 @@ export function rdsPostgresMeter(sizing: RdsSizing): Meter {
         `no price in the ${pricing.provider} ${pricing.region} snapshot for RDS instance class "${sizing.instanceClass}"; priced classes are ${Object.keys(rds.instanceHour).join(", ")}`,
       );
     }
-    const azFactor = sizing.multiAz ? rds.multiAzFactor : 1;
-    // The free tier covers one single-AZ instance of an eligible class and its
-    // storage; anything else is billed in full.
+    const deployment = sizing.multiAz ? "multiAz" : "singleAz";
+    // A free tier allowance, when one exists, covers one single-AZ instance of
+    // an eligible class and its storage; anything else is billed in full.
     const eligible = !sizing.multiAz && pricing.freeTier.rdsEligibleInstanceClasses.includes(sizing.instanceClass);
     return [
-      { quantity: pricing.hoursPerMonth, unitPrice: instanceHour * azFactor, ...(eligible && { allowance: "rdsInstanceHours" }) },
-      { quantity: sizing.storageGb, unitPrice: rds.storageGbMonth.gp3 * azFactor, ...(eligible && { allowance: "rdsStorageGbMonths" }) },
+      { quantity: pricing.hoursPerMonth, unitPrice: instanceHour[deployment], ...(eligible && { allowance: "rdsInstanceHours" }) },
+      { quantity: sizing.storageGb, unitPrice: rds.storageGbMonth.gp3[deployment], ...(eligible && { allowance: "rdsStorageGbMonths" }) },
       // The AWS-managed master password lives in one Secrets Manager secret.
       { quantity: 1, unitPrice: pricing.secretsManager.secretMonth },
     ];

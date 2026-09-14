@@ -23,12 +23,14 @@ describe("GET /estimate for the sample blueprint's dev environment", () => {
   //             API Gateway 0.1M x $1.00 = $0.10                          -> $0.20
   //   low:      50,000 requests, 1,250 GB-s: $0.01 + $0.0208 + $0.05     -> $0.08
   //   high:     200,000 requests, 30,000 GB-s: $0.04 + $0.50 + $0.20     -> $0.74
-  //   with free tier: under 1M requests and 400,000 GB-s everywhere       -> $0
+  //   with free tier: Lambda's always-free 1M requests and 400,000 GB-s
+  //   cover it; API Gateway has no always-free allowance                  -> $0.10
+  //   (low $0.05, high $0.20)
   //
   // db on rds-postgres, derived db.t4g.micro / 20 GB / single-AZ:
   //   730 h x $0.016 = $11.68, 20 GB x $0.115 = $2.30, managed password
   //   secret $0.40; the same at every load                               -> $14.38
-  //   with free tier: 750 instance hours and 20 GB storage free           -> $0.40
+  //   with free tier: RDS has no always-free allowance                    -> $14.38
   it("derives the low-end sizing and estimates each intent and the total", async () => {
     const { status, body } = await estimate(sampleBlueprint, "dev");
 
@@ -36,7 +38,7 @@ describe("GET /estimate for the sample blueprint's dev environment", () => {
     expect(body).toEqual({
       environment: "dev",
       usage: { requestsPerMonth: 100000, storageGb: 1 },
-      freeTierLabel: "assumes classic free tier",
+      freeTierLabel: "always-free allowances only",
       intents: {
         api: {
           resolution: "lambda-api-gateway",
@@ -45,7 +47,7 @@ describe("GET /estimate for the sample blueprint's dev environment", () => {
             timeoutSeconds: { value: 10, source: "derived" },
           },
           withoutFreeTier: { low: 0.08, expected: 0.2, high: 0.74 },
-          withFreeTier: { low: 0, expected: 0, high: 0 },
+          withFreeTier: { low: 0.05, expected: 0.1, high: 0.2 },
         },
         db: {
           resolution: "rds-postgres",
@@ -55,12 +57,12 @@ describe("GET /estimate for the sample blueprint's dev environment", () => {
             multiAz: { value: false, source: "derived" },
           },
           withoutFreeTier: { low: 14.38, expected: 14.38, high: 14.38 },
-          withFreeTier: { low: 0.4, expected: 0.4, high: 0.4 },
+          withFreeTier: { low: 14.38, expected: 14.38, high: 14.38 },
         },
       },
       total: {
         withoutFreeTier: { low: 14.46, expected: 14.58, high: 15.12 },
-        withFreeTier: { low: 0.4, expected: 0.4, high: 0.4 },
+        withFreeTier: { low: 14.43, expected: 14.48, high: 14.58 },
       },
     });
   });
@@ -74,15 +76,14 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
   //   expected: 2M requests: $0.40 + 100,000 GB-s $1.6667 + gateway $2.00  -> $4.07
   //   low:      1M requests: $0.20 + 25,000 GB-s $0.4167 + gateway $1.00   -> $1.62
   //   high:     4M requests: $0.80 + 600,000 GB-s $10.00 + gateway $4.00   -> $14.80
-  //   with free tier (1M requests, 400,000 GB-s, 1M gateway requests free):
-  //     expected: 1M x $0.20 + 0 + 1M x $1.00                              -> $1.20
-  //     low: everything within the allowances                              -> $0
-  //     high: 3M x $0.20 + 200,000 GB-s x $0.0000166667 + 3M x $1.00      -> $6.93
+  //   with free tier (1M requests and 400,000 GB-s free, the gateway not):
+  //     expected: 1M x $0.20 + 0 + 2M x $1.00                              -> $2.20
+  //     low: requests and duration within the allowances, gateway $1.00    -> $1.00
+  //     high: 3M x $0.20 + 200,000 GB-s x $0.0000166667 + 4M x $1.00      -> $7.93
   //
   // db pinned to db.t4g.small, derived 20 GB / single-AZ:
   //   730 h x $0.032 = $23.36 + $2.30 storage + $0.40 secret               -> $26.06
-  //   with free tier: db.t4g.small is not eligible, so neither its hours
-  //   nor its storage are free                                             -> $26.06
+  //   with free tier: nothing of RDS is always free                        -> $26.06
   it("applies the environment's usage profile and marks the pinned instance class as overridden", async () => {
     const { status, body } = await estimate(sampleBlueprint, "prod");
 
@@ -90,7 +91,7 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
     expect(body).toEqual({
       environment: "prod",
       usage: { requestsPerMonth: 2000000, storageGb: 1 },
-      freeTierLabel: "assumes classic free tier",
+      freeTierLabel: "always-free allowances only",
       intents: {
         api: {
           resolution: "lambda-api-gateway",
@@ -99,7 +100,7 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
             timeoutSeconds: { value: 10, source: "derived" },
           },
           withoutFreeTier: { low: 1.62, expected: 4.07, high: 14.8 },
-          withFreeTier: { low: 0, expected: 1.2, high: 6.93 },
+          withFreeTier: { low: 1, expected: 2.2, high: 7.93 },
         },
         db: {
           resolution: "rds-postgres",
@@ -114,7 +115,7 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
       },
       total: {
         withoutFreeTier: { low: 27.68, expected: 30.13, high: 40.86 },
-        withFreeTier: { low: 26.06, expected: 27.26, high: 32.99 },
+        withFreeTier: { low: 27.06, expected: 28.26, high: 33.99 },
       },
     });
   });
@@ -123,7 +124,7 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
   // pool for the account: api draws the 1M free requests first, admin gets
   // none of them and only the 300,000 GB-s left.
   //   admin with free tier, expected: 2M x $0.20 + 0 + 2M x $1.00          -> $2.40
-  //   total with free tier, expected: $1.20 + $2.40 + $26.06               -> $29.66
+  //   total with free tier, expected: $2.20 + $2.40 + $26.06               -> $30.66
   //   total without: $4.0667 + $4.0667 + $26.06                            -> $34.19
   it("draws every intent from one free tier pool so the total never counts an allowance twice", async () => {
     const twoApis = sampleBlueprint.replace(
@@ -133,22 +134,23 @@ describe("GET /estimate for the sample blueprint's prod environment", () => {
 
     const { body } = await estimate(twoApis, "prod");
 
-    expect(body.intents.api?.withFreeTier.expected).toBe(1.2);
+    expect(body.intents.api?.withFreeTier.expected).toBe(2.2);
     expect(body.intents.admin?.withFreeTier.expected).toBe(2.4);
-    expect(body.total.withFreeTier.expected).toBe(29.66);
+    expect(body.total.withFreeTier.expected).toBe(30.66);
     expect(body.total.withoutFreeTier.expected).toBe(34.19);
   });
 
-  // Multi-AZ doubles the instance hours and the storage and forfeits the
-  // free tier: 2 x $11.68 + 2 x $2.30 + $0.40                              -> $28.36
-  it("doubles the database and forfeits its free tier when multiAz is pinned", async () => {
-    const multiAz = sampleBlueprint.replace("instanceClass: db.t4g.small", "multiAz: true");
+  // Multi-AZ is priced on its own SKUs, not as a double: db.t4g.small is
+  // $0.065 an hour, not 2 x $0.032; gp3 storage is $0.23 a GB-month.
+  //   730 h x $0.065 = $47.45 + 20 GB x $0.23 = $4.60 + $0.40               -> $52.45
+  it("prices the database at its Multi-AZ SKUs when multiAz is pinned", async () => {
+    const multiAz = sampleBlueprint.replace("instanceClass: db.t4g.small", "instanceClass: db.t4g.small\n        multiAz: true");
 
     const { body } = await estimate(multiAz, "prod");
 
     expect(body.intents.db?.sizing.multiAz).toEqual({ value: true, source: "overridden" });
-    expect(body.intents.db?.withoutFreeTier).toEqual({ low: 28.36, expected: 28.36, high: 28.36 });
-    expect(body.intents.db?.withFreeTier).toEqual({ low: 28.36, expected: 28.36, high: 28.36 });
+    expect(body.intents.db?.withoutFreeTier).toEqual({ low: 52.45, expected: 52.45, high: 52.45 });
+    expect(body.intents.db?.withFreeTier).toEqual({ low: 52.45, expected: 52.45, high: 52.45 });
   });
 });
 
@@ -160,9 +162,9 @@ describe("GET /estimate for an HTTP API on fargate-load-balancer", () => {
   //   capacity units: 100,000 requests / (3600 s x 25 connections per
   //   unit) = 1.11 LCU-hours x $0.008                                      -> $0.0089
   //   expected $25.44; low (0.56 LCU-h) $25.44; high (2.22 LCU-h) $25.45
-  //   with free tier: 750 load balancer hours and 15 LCU-hours free, the
-  //   task is not                                                          -> $9.01
-  it("estimates the task hours and the load balancer, with only the balancer in the free tier", async () => {
+  //   with free tier: nothing of Fargate or the load balancer is always
+  //   free                                                                 -> $25.44
+  it("estimates the task hours and the load balancer, none of it in the free tier", async () => {
     const fargate = sampleBlueprint.replace("resolution: lambda-api-gateway", "resolution: fargate-load-balancer");
 
     const { status, body } = await estimate(fargate, "dev");
@@ -176,11 +178,11 @@ describe("GET /estimate for an HTTP API on fargate-load-balancer", () => {
         desiredCount: { value: 1, source: "derived" },
       },
       withoutFreeTier: { low: 25.44, expected: 25.44, high: 25.45 },
-      withFreeTier: { low: 9.01, expected: 9.01, high: 9.01 },
+      withFreeTier: { low: 25.44, expected: 25.44, high: 25.45 },
     });
     expect(body.total).toEqual({
       withoutFreeTier: { low: 39.82, expected: 39.82, high: 39.83 },
-      withFreeTier: { low: 9.41, expected: 9.41, high: 9.41 },
+      withFreeTier: { low: 39.82, expected: 39.82, high: 39.83 },
     });
   });
 });
