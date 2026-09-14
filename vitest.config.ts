@@ -11,7 +11,9 @@ export default defineConfig({
   },
   ssr: {
     resolve: {
-      conditions: [sourceCondition, ...defaultServerConditions],
+      // Without "module": Pulumi's SDK depends on @opentelemetry/api, whose
+      // "module" build imports without extensions and cannot run in Node.
+      conditions: [sourceCondition, ...defaultServerConditions.filter((condition) => condition !== "module")],
     },
   },
   test: {
