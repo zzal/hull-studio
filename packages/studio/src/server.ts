@@ -8,6 +8,7 @@ import {
   opsSchema,
   PatchError,
   sizingValues,
+  type Blueprint,
   type Diagnostic,
   type LoadResult,
   type MergedBlueprint,
@@ -29,6 +30,10 @@ import { Hono, type Context } from "hono";
 export type StudioOptions = {
   // Directory holding hull.yaml.
   directory: string;
+  // Called with the new model after a valid patch is written to the file.
+  // Every studio save regenerates the bindings; the studio knows nothing of
+  // how they are compiled, so `hull studio` plugs the compiler in here.
+  onWrite?: (blueprint: Blueprint) => void;
 };
 
 // GET /estimate?environment=<name>: the blueprint merged for that environment
@@ -56,7 +61,7 @@ export type ErrorResponse = { error: string; diagnostics?: Diagnostic[] };
 
 // The studio HTTP API over one blueprint directory, as a Hono app so tests
 // call it in-process; startStudio serves it with the dashboard.
-export function createStudioServer({ directory }: StudioOptions) {
+export function createStudioServer({ directory, onWrite }: StudioOptions) {
   const app = new Hono();
   const file = join(directory, blueprintFileName);
 
@@ -79,8 +84,8 @@ export function createStudioServer({ directory }: StudioOptions) {
   });
 
   // PUT /blueprint with a list of operations: applied to the current text,
-  // the result validated, then written only if valid. The answer is what
-  // GET /blueprint would return afterwards.
+  // the result validated, then written only if valid and handed to onWrite.
+  // The answer is what GET /blueprint would return afterwards.
   app.put("/blueprint", async (c) => {
     const current = readText();
     if (current === undefined) return missingBlueprint(c);
@@ -100,6 +105,7 @@ export function createStudioServer({ directory }: StudioOptions) {
       return c.json({ error: `the patch makes ${blueprintFileName} invalid`, diagnostics: loaded.diagnostics }, 422);
     }
     writeFileSync(file, text);
+    onWrite?.(loaded.blueprint);
     return c.json(loaded);
   });
 

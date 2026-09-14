@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { blueprintFileName } from "@hull/blueprint";
+import { writeBindings } from "@hull/compiler/bindings";
 import { startStudio } from "@hull/studio";
 import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
@@ -26,7 +27,9 @@ export function studioCommand({ cwd, output, openBrowser, signal }: CommandConte
         throw new Error(`"${args.port}" is not a port number`);
       }
 
-      const studio = await startStudio({ directory: cwd, port });
+      // Every studio save regenerates the bindings, so the tier's typed
+      // access to its linked intents always matches the file.
+      const studio = await startStudio({ directory: cwd, port, onWrite: (blueprint) => writeBindings(cwd, blueprint) });
       try {
         output(`Studio at ${studio.url}`);
         output("Press Ctrl+C to stop.");

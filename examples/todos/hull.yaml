@@ -1,0 +1,33 @@
+# $schema: ../../packages/blueprint/schema/v0/hull.json
+# yaml-language-server: $schema=../../packages/blueprint/schema/v0/hull.json
+
+name: todos
+provider: aws
+region: us-east-1
+
+usage:
+  # usage profile, low-end defaults from `hull init`
+  requestsPerMonth: 100000
+  storageGb: 1
+
+intents:
+  api:
+    kind: http-api
+    resolution: lambda-api-gateway
+    entry: src/api/index.ts
+    links:
+      - to: db
+        role: read-write
+
+  db:
+    kind: relational-database
+    resolution: rds-postgres
+
+environments:
+  dev: {}
+  prod:
+    usage:
+      requestsPerMonth: 2000000
+    overrides:
+      db:
+        instanceClass: db.t4g.small

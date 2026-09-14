@@ -9,6 +9,11 @@
       "@hull/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./bindings": {
+      "@hull/source": "./src/bindings.ts",
+      "types": "./dist/bindings.d.ts",
+      "import": "./dist/bindings.js"
     }
   },
   "files": [
@@ -25,5 +30,8 @@
     "@pulumi/pulumi": "^3.262.0",
     "esbuild": "^0.28.2",
     "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1131.0"
   }
 }

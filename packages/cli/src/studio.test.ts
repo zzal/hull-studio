@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "citty";
@@ -85,6 +85,26 @@ describe("hull studio", () => {
     const response = await fetch(`${opened}/blueprint`);
     expect(response.status).toBe(200);
     expect(((await response.json()) as { blueprint: { name: string } }).blueprint.name).toBe("todos");
+  });
+
+  // A patch through the studio API regenerates the binding module: here the
+  // patch links the API to the database, so the module gains `db`.
+  it("regenerates the bindings after a patch through the studio API", async () => {
+    const directory = directoryWithSample();
+    const { url } = runStudio(directory);
+    const opened = await url;
+
+    const response = await fetch(`${opened}/blueprint`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ op: "set", path: ["intents", "api", "links"], value: [{ to: "db", role: "read-write" }] }]),
+    });
+
+    expect(response.status).toBe(200);
+    const bindings = readFileSync(join(directory, ".hull", "bindings", "index.ts"), "utf8");
+    expect(bindings.split("\n")[0]).toMatch(/generated.*do not edit/i);
+    expect(bindings).toContain("export const db");
+    expect(bindings).toContain("connectionString()");
   });
 
   it("runs until the context's signal aborts, then stops serving", async () => {

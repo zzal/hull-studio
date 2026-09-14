@@ -56,6 +56,23 @@ The studio API serves `GET /blueprint` (model and diagnostics) and
 each sizing value marked derived or overridden, and the monthly low, expected
 and high figures per intent and in total, with and without free tier).
 
+`.hull/bindings/index.ts` is the binding module: generated from the blueprint
+on every studio save (and, later, every deploy), one exported object per intent
+a tier is linked to, typed by role. For the read-write database link, `db`
+exposes `connectionString()`, which reads the link's `HULL_DB_*` variables,
+fetches the managed master password once through the AWS SDK, keeps it for the
+process lifetime and returns a Postgres URL with SSL required. The folder is
+gitignored, every file carries a "generated, do not edit" header, and the
+language-agnostic contract behind it is the environment variables the compiler
+sets on the tier (`HULL_<INTENT>_HOST`, `_PORT`, `_NAME`, `_USER`,
+`_PASSWORD_ARN`).
+
+`examples/todos` is the application the demo deploys: a Hono app exporting a
+Lambda `handler` whose `GET /todos` reaches Postgres through the binding. It
+ships its `hull.yaml`; `pnpm typecheck` there regenerates the bindings first
+(`pnpm bindings`), and `tests/todos-example.test.ts` bundles the entry and
+typechecks the example against them.
+
 ## Developing
 
 Requires Node 22 or later and pnpm 10 (`corepack enable` picks the pinned
@@ -86,7 +103,10 @@ hull destroy --env dev    # everything gone, bill stays near zero
 ```
 
 This path touches real AWS and is a manual test, not an automated one. The
-automated suite never needs credentials or the network.
+automated suite never needs credentials or the network. `examples/todos`
+already carries its `hull.yaml` (the sample `hull init` writes, with the schema
+comments pointing at the workspace's own schema file), so the script starts at
+`hull studio` there; `hull init` is for a fresh directory.
 
 Cost of a run: RDS `db.t4g.micro` is about two cents an hour, Lambda and API
 Gateway sit in the free tier at demo traffic, the S3 state bucket is cents,

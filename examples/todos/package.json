@@ -5,6 +5,17 @@
   "description": "The proof-of-concept application deployed by the demo script: an HTTP API on Lambda reading todos from RDS Postgres",
   "type": "module",
   "scripts": {
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "bindings": "tsx --conditions=@hull/source scripts/bindings.ts",
+    "typecheck": "pnpm bindings && tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1131.0",
+    "hono": "^4.13.7",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@hull/blueprint": "workspace:*",
+    "@hull/catalog": "workspace:*",
+    "@hull/compiler": "workspace:*"
   }
 }

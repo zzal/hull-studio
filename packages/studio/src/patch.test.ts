@@ -2,9 +2,9 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LoadResult, Op } from "@hull/blueprint";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createStudioServer, type ErrorResponse } from "./index.js";
-import { comments, handFormattedBlueprint, lineDiff, patch, sampleBlueprint, studioDirectoryOver } from "./testing.js";
+import { blueprintDirectory, comments, handFormattedBlueprint, lineDiff, patch, sampleBlueprint, studioDirectoryOver } from "./testing.js";
 
 // PUT /blueprint with a list of operations: the server applies them to the
 // blueprint text, validates the result, and either writes the file and
@@ -352,5 +352,40 @@ describe("PUT /blueprint with the dashboard's edits", () => {
     expect(status).toBe(422);
     expect(body.diagnostics).toEqual([{ path: ["usage", "requestsPerMonth"], message: "Too small: expected number to be >=0" }]);
     expect(file).toBe(handFormattedBlueprint);
+  });
+});
+
+describe("PUT /blueprint and onWrite", () => {
+  // Every studio save regenerates the bindings (spec, "Compile, deploy,
+  // bindings"); the studio hands the written model to whoever does that.
+  it("calls onWrite with the new model after writing the file", async () => {
+    const directory = blueprintDirectory(sampleBlueprint);
+    const onWrite = vi.fn();
+    const app = createStudioServer({ directory, onWrite });
+
+    const response = await app.request("/blueprint", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ op: "set", path: ["usage", "storageGb"], value: 2 }]),
+    });
+
+    expect(response.status).toBe(200);
+    expect(onWrite).toHaveBeenCalledTimes(1);
+    expect(onWrite.mock.calls[0]?.[0]).toMatchObject({ name: "todos", usage: { requestsPerMonth: 100000, storageGb: 2 } });
+    expect(readFileSync(join(directory, "hull.yaml"), "utf8")).toContain("  storageGb: 2\n");
+  });
+
+  it("does not call onWrite for a rejected patch", async () => {
+    const onWrite = vi.fn();
+    const app = createStudioServer({ directory: blueprintDirectory(sampleBlueprint), onWrite });
+
+    const response = await app.request("/blueprint", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify([{ op: "set", path: ["usage", "requestsPerMonth"], value: -1 }]),
+    });
+
+    expect(response.status).toBe(422);
+    expect(onWrite).not.toHaveBeenCalled();
   });
 });

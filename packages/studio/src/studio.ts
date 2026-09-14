@@ -38,8 +38,8 @@ const clientDirectory = fileURLToPath(new URL("../dist/client/", import.meta.url
 // Start the studio over one blueprint directory: the HTTP API, the dashboard
 // as static files, and a WebSocket that pushes `{ event: "changed" }` whenever
 // hull.yaml changes on disk, whether an editor or the studio itself wrote it.
-export async function startStudio({ directory, port = 0 }: StartStudioOptions): Promise<RunningStudio> {
-  const app = createStudioServer({ directory });
+export async function startStudio({ directory, onWrite, port = 0 }: StartStudioOptions): Promise<RunningStudio> {
+  const app = createStudioServer({ directory, onWrite });
   if (existsSync(clientDirectory)) {
     app.use("/*", serveStatic({ root: clientDirectory }));
   } else {
