@@ -1,6 +1,6 @@
 import type { EngineEvent } from "@pulumi/pulumi/automation/index.js";
 import { describe, expect, it } from "vitest";
-import { progressFromEngineEvent } from "./deploy/pulumi-engine.js";
+import { engineFailureMessage, progressFromEngineEvent } from "./deploy/pulumi-engine.js";
 import { renderProgress } from "./deploy/progress.js";
 
 // Seam 2, below the command: the one place Pulumi's event shapes are
@@ -40,6 +40,8 @@ describe("progressFromEngineEvent", () => {
     const diagnostic = (severity: string) => ({ ...base, diagnosticEvent: { message: "why\n", severity, color: "", streamID: 0, ephemeral: false } });
 
     expect(progressFromEngineEvent(diagnostic("error") as unknown as EngineEvent)).toEqual({ phase: "diagnostic", severity: "error", message: "why\n" });
+    const attributed = { ...diagnostic("error"), diagnosticEvent: { ...diagnostic("error").diagnosticEvent, urn } };
+    expect(progressFromEngineEvent(attributed as unknown as EngineEvent)).toEqual({ phase: "diagnostic", severity: "error", name: "db", message: "why\n" });
     expect(progressFromEngineEvent(diagnostic("warning") as unknown as EngineEvent)).toMatchObject({ severity: "warning" });
     expect(progressFromEngineEvent(diagnostic("info") as unknown as EngineEvent)).toBeUndefined();
     expect(renderProgress({ phase: "diagnostic", severity: "error", message: "why\n" })).toBe("  error: why");
@@ -62,5 +64,24 @@ describe("renderProgress", () => {
       "Summary: 2 created, 1 updated, 3 deleted, 4 unchanged, 1 replaced in 1m 1s.",
     );
     expect(renderProgress({ phase: "summary", changes: {}, durationSeconds: 3 })).toBe("Summary: no changes in 3s.");
+  });
+});
+
+// The SDK's CommandError by shape: its message is the whole transcript and
+// its command result carries the streams.
+function commandError(stderr: string) {
+  const error = new Error(`code: 255\n stdout: Updating (dev)...\n stderr: ${stderr}\n err?: undefined`);
+  error.name = "CommandError";
+  return Object.assign(error, { commandResult: { code: 255, stdout: "Updating (dev)...", stderr, err: undefined } });
+}
+
+describe("engineFailureMessage", () => {
+  it("keeps the error lines of a failed Pulumi command, not its whole transcript", () => {
+    expect(engineFailureMessage(commandError("warning: something minor\nerror: update failed\n"))).toBe("the deploy engine stopped: update failed");
+  });
+
+  it("falls back to the last line of stderr, then to the error's own message", () => {
+    expect(engineFailureMessage(commandError("first\nlast\n"))).toBe("the deploy engine stopped: last");
+    expect(engineFailureMessage(new Error("ENOENT: pulumi"))).toBe("the deploy engine stopped: ENOENT: pulumi");
   });
 });

@@ -2,7 +2,7 @@ import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
 import { awsAccount } from "../deploy/aws-account.js";
 import { loadEnvironment, readLocalState, stackTarget } from "../deploy/environment.js";
-import { renderProgress } from "../deploy/progress.js";
+import { renderProgress, watchFailures } from "../deploy/progress.js";
 import { pulumiEngine } from "../deploy/pulumi-engine.js";
 import { passphraseFileName, stateFileName } from "../deploy/state.js";
 
@@ -36,8 +36,14 @@ export function destroyCommand({ cwd, output, engine = pulumiEngine(), provider 
       output(`Destroying ${blueprint.name} ${args.env} in ${blueprint.region} (account ${account}, profile ${profile}).`);
 
       const target = stackTarget(environment, recorded.stateBucket, passphrase);
-      await engine.destroy(target, (event) => output(renderProgress(event)));
-      await engine.removeStack(target);
+      const progress = watchFailures((event) => output(renderProgress(event)));
+      const operation = `destroy of ${blueprint.name} ${args.env}`;
+      await engine.destroy(target, progress.onProgress).catch((error: unknown) => {
+        throw progress.report(operation, error, `What was removed is recorded in the environment's state: run \`hull destroy --env ${args.env}\` again to remove the rest.`);
+      });
+      await engine.removeStack(target).catch((error: unknown) => {
+        throw progress.report(operation, error, `Every resource is gone, but the environment's state is still in the bucket: run \`hull destroy --env ${args.env}\` again to remove it.`);
+      });
       output(
         `Removed ${args.env} from the state bucket ${recorded.stateBucket}; the bucket, ${stateFileName} and ${passphraseFileName} are kept, so the next deploy starts from scratch.`,
       );

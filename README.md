@@ -88,6 +88,18 @@ later secrets provider. The blueprint is then compiled, the bindings
 regenerated, the tier bundled, and the program run through the deploy engine
 with one line per resource event and a summary, ending with the API URL.
 
+Pre-flight stops at the first failure with a message a first-time user can
+act on: the Pulumi CLI missing (with the install command), the blueprint
+invalid (the diagnostics), an entry file missing (the path), the passphrase
+gone (where to copy it from), AWS credentials missing or expired (the profile
+and region tried). None of these reaches the engine. When a deploy or a destroy fails
+mid-way, the report names each failed resource with what the provider said
+about it, or the engine's error line when no resource failed, and says what
+to do next: Pulumi keeps what was created or removed in the environment's
+state, so `hull deploy` again retries and `hull destroy` removes what is
+there. The binary prints the message alone to stderr and exits 1; Pulumi's
+own transcript never reaches the terminal.
+
 `hull destroy --env <name>` is the other half: the same pre-flight minus the
 entry files, then the engine removes every resource of the environment with
 the same per-resource lines and summary, and removes the environment's state

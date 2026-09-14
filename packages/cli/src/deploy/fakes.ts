@@ -70,9 +70,12 @@ type FakeEngineOptions = {
   destroyEvents?: ProgressEvent[];
   outputs?: Record<string, unknown>;
   cliMissing?: boolean;
+  // Thrown by `up` and `destroy` after their events, as the engine does
+  // when an operation failed.
+  fails?: string;
 };
 
-export function fakeEngine({ upEvents = [], destroyEvents = [], outputs = { apiUrl }, cliMissing = false }: FakeEngineOptions = {}) {
+export function fakeEngine({ upEvents = [], destroyEvents = [], outputs = { apiUrl }, cliMissing = false, fails }: FakeEngineOptions = {}) {
   const calls: EngineCall[] = [];
   const engine: DeployEngine = {
     async check() {
@@ -82,11 +85,13 @@ export function fakeEngine({ upEvents = [], destroyEvents = [], outputs = { apiU
     async up(target, program, onEvent) {
       calls.push({ method: "up", target, program });
       for (const event of upEvents) onEvent(event);
+      if (fails) throw new Error(fails);
       return outputs;
     },
     async destroy(target, onEvent) {
       calls.push({ method: "destroy", target });
       for (const event of destroyEvents) onEvent(event);
+      if (fails) throw new Error(fails);
     },
     async removeStack(target) {
       calls.push({ method: "removeStack", target });
@@ -116,16 +121,21 @@ export function fakeProvider({ existingBuckets = [] as string[], noCredentials =
   return { calls, provider };
 }
 
-type Fakes = { engine?: DeployEngine; provider?: ProviderAccount; args?: string[] };
+type Fakes = {
+  engine?: DeployEngine;
+  provider?: ProviderAccount;
+  args?: string[];
+  // Receives the printed lines as they come, for a run expected to fail.
+  lines?: string[];
+};
 
 // Runs one command in the directory against the fakes and returns what it
 // printed.
 export async function runHull(
   directory: string,
   command: "deploy" | "destroy",
-  { engine = fakeEngine().engine, provider = fakeProvider().provider, args = ["--env", "dev"] }: Fakes = {},
+  { engine = fakeEngine().engine, provider = fakeProvider().provider, args = ["--env", "dev"], lines = [] }: Fakes = {},
 ) {
-  const lines: string[] = [];
   await runCommand(
     createHull({
       cwd: directory,

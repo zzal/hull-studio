@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as pulumi from "@pulumi/pulumi";
 import { describe, expect, it } from "vitest";
+import type { ProgressEvent } from "./deploy/engine.js";
 import {
   account,
   apiUrl,
@@ -151,6 +152,59 @@ describe("hull deploy --env dev, first deploy", () => {
   });
 });
 
+describe("hull deploy --env dev, failed deploy", () => {
+  const events = [
+    { phase: "started", operation: "create", type: "aws:ec2/securityGroup:SecurityGroup", name: "db" },
+    { phase: "done", operation: "create", type: "aws:ec2/securityGroup:SecurityGroup", name: "db" },
+    { phase: "started", operation: "create", type: "aws:rds/instance:Instance", name: "db" },
+    { phase: "diagnostic", severity: "error", name: "db", message: "creating RDS DB Instance (db-1a2b): InsufficientDBInstanceCapacity: no capacity in us-east-1a\n" },
+    { phase: "failed", operation: "create", type: "aws:rds/instance:Instance", name: "db" },
+    { phase: "diagnostic", severity: "error", message: "update failed\n" },
+    { phase: "summary", changes: { create: 1 }, durationSeconds: 40 },
+  ] satisfies ProgressEvent[];
+
+  it("names the failed resource and the provider's reason, not the engine's, and says how to retry or clean up", async () => {
+    const directory = directoryWithSample();
+    const { engine } = fakeEngine({ upEvents: events, fails: "the deploy engine stopped: update failed" });
+
+    await expect(runDeploy(directory, { engine })).rejects.toThrow(
+      [
+        "deploy of todos dev failed:",
+        "  aws:rds/instance:Instance db: creating RDS DB Instance (db-1a2b): InsufficientDBInstanceCapacity: no capacity in us-east-1a",
+        "What was created is recorded in the environment's state: run `hull deploy --env dev` again to retry, or `hull destroy --env dev` to remove it.",
+      ].join("\n"),
+    );
+    expect(JSON.parse(readFileSync(stateFile(directory), "utf8"))).toEqual({ stateBucket });
+    expect(readFileSync(passphraseFile(directory), "utf8")).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  });
+
+  it("still renders the progress and the summary before the failure", async () => {
+    const directory = directoryWithSample();
+    const { engine } = fakeEngine({ upEvents: events, fails: "the deploy engine stopped: update failed" });
+    const lines: string[] = [];
+
+    await expect(runDeploy(directory, { engine, lines })).rejects.toThrow();
+
+    expect(lines.slice(-3)).toEqual([
+      "  failed   create  aws:rds/instance:Instance  db",
+      "  error: update failed",
+      "Summary: 1 created in 40s.",
+    ]);
+  });
+
+  it("passes the engine's own words through when no resource failed, with the same advice", async () => {
+    const directory = directoryWithSample();
+    const { engine } = fakeEngine({ fails: "the deploy engine stopped: error: could not lock the state" });
+
+    await expect(runDeploy(directory, { engine })).rejects.toThrow(
+      [
+        "deploy of todos dev failed: the deploy engine stopped: error: could not lock the state",
+        "What was created is recorded in the environment's state: run `hull deploy --env dev` again to retry, or `hull destroy --env dev` to remove it.",
+      ].join("\n"),
+    );
+  });
+});
+
 describe("hull deploy --env dev, later deploys", () => {
   it("reuses the recorded state bucket and says so", async () => {
     const directory = directoryWithSample();
@@ -218,24 +272,28 @@ describe("hull deploy pre-flight", () => {
   });
 
   it("reports an invalid blueprint with its diagnostics and makes no cloud call", async () => {
+    const engine = fakeEngine();
     const provider = fakeProvider();
     const directory = directoryWithSample({ blueprint: sampleBlueprint.replace("lambda-api-gateway", "fargate-api") });
 
-    await expect(runDeploy(directory, { provider: provider.provider })).rejects.toThrow(
+    await expect(runDeploy(directory, { engine: engine.engine, provider: provider.provider })).rejects.toThrow(
       /hull\.yaml is not valid:\n  intents\.api\.resolution: "fargate-api" is not a candidate resolution/,
     );
 
     expect(provider.calls).toEqual([]);
+    expect(engine.calls.map((call) => call.method)).toEqual(["check"]);
   });
 
   it("reports a missing entry file and makes no cloud call", async () => {
+    const engine = fakeEngine();
     const provider = fakeProvider();
 
-    await expect(runDeploy(directoryWithSample({ entry: false }), { provider: provider.provider })).rejects.toThrow(
+    await expect(runDeploy(directoryWithSample({ entry: false }), { engine: engine.engine, provider: provider.provider })).rejects.toThrow(
       "no entry src/api/index.ts for intent api; hull.yaml points at a file that does not exist",
     );
 
     expect(provider.calls).toEqual([]);
+    expect(engine.calls.map((call) => call.method)).toEqual(["check"]);
   });
 
   it("reports missing credentials and calls nothing else", async () => {

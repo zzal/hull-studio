@@ -94,6 +94,45 @@ describe("hull destroy --env dev", () => {
   });
 });
 
+describe("hull destroy --env dev, failed destroy", () => {
+  it("names the failed resource and the provider's reason, and says to run it again", async () => {
+    const { engine } = fakeEngine({
+      destroyEvents: [
+        { phase: "started", operation: "delete", type: "aws:rds/instance:Instance", name: "db" },
+        { phase: "diagnostic", severity: "error", name: "db", message: "deleting RDS DB Instance (db-1a2b): InvalidDBInstanceState: instance is being modified\n" },
+        { phase: "failed", operation: "delete", type: "aws:rds/instance:Instance", name: "db" },
+        { phase: "summary", changes: { delete: 0 }, durationSeconds: 12 },
+      ],
+      fails: "the deploy engine stopped: update failed",
+    });
+    const lines: string[] = [];
+
+    await expect(runDestroy(deployedDirectory(), { engine, lines })).rejects.toThrow(
+      [
+        "destroy of todos dev failed:",
+        "  aws:rds/instance:Instance db: deleting RDS DB Instance (db-1a2b): InvalidDBInstanceState: instance is being modified",
+        "What was removed is recorded in the environment's state: run `hull destroy --env dev` again to remove the rest.",
+      ].join("\n"),
+    );
+    expect(lines).toContain("Summary: no changes in 12s.");
+    expect(lines).not.toContainEqual(expect.stringMatching(/^Removed/));
+  });
+
+  it("says so when the resources are gone but the state could not be removed", async () => {
+    const engine = fakeEngine().engine;
+    engine.removeStack = async () => {
+      throw new Error("the deploy engine stopped: error: could not remove the stack");
+    };
+
+    await expect(runDestroy(deployedDirectory(), { engine })).rejects.toThrow(
+      [
+        "destroy of todos dev failed: the deploy engine stopped: error: could not remove the stack",
+        "Every resource is gone, but the environment's state is still in the bucket: run `hull destroy --env dev` again to remove it.",
+      ].join("\n"),
+    );
+  });
+});
+
 describe("hull destroy pre-flight", () => {
   it("requires --env", async () => {
     await expect(runDestroy(deployedDirectory(), { args: [] })).rejects.toThrow(/--env/);

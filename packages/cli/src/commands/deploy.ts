@@ -6,7 +6,7 @@ import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
 import { awsAccount } from "../deploy/aws-account.js";
 import { loadEnvironment, readLocalState, stackTarget } from "../deploy/environment.js";
-import { renderProgress } from "../deploy/progress.js";
+import { renderProgress, watchFailures } from "../deploy/progress.js";
 import { pulumiEngine } from "../deploy/pulumi-engine.js";
 import { generatePassphrase, passphraseFileName, stateBucketName, stateFileName, writeState } from "../deploy/state.js";
 
@@ -67,7 +67,13 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
       );
       const program = compileProgram({ blueprint: merged, bundles });
 
-      const outputs = await engine.up(stackTarget(environment, stateBucket, passphrase), program, (event) => output(renderProgress(event)));
+      // A failure mid-way leaves what was created in the environment's
+      // state; the report names the resources and what the provider said.
+      const progress = watchFailures((event) => output(renderProgress(event)));
+      const advice = `What was created is recorded in the environment's state: run \`hull deploy --env ${args.env}\` again to retry, or \`hull destroy --env ${args.env}\` to remove it.`;
+      const outputs = await engine.up(stackTarget(environment, stateBucket, passphrase), program, progress.onProgress).catch((error: unknown) => {
+        throw progress.report(`deploy of ${blueprint.name} ${args.env}`, error, advice);
+      });
 
       const apiUrl = outputs.apiUrl;
       if (typeof apiUrl === "string") {

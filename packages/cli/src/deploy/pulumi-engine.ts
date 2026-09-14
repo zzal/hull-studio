@@ -47,18 +47,42 @@ export function pulumiEngine(): DeployEngine {
     },
     async up(target, program, onProgress) {
       const stack = await stackFor(target, program);
-      const result = await stack.up({ color: "never", onEvent: (event) => forward(event, onProgress) });
+      const result = await stack
+        .up({ color: "never", onEvent: (event) => forward(event, onProgress) })
+        .catch((error: unknown) => Promise.reject(new Error(engineFailureMessage(error))));
       return Object.fromEntries(Object.entries(result.outputs).map(([name, output]) => [name, output.value]));
     },
     async destroy(target, onProgress) {
       const stack = await stackFor(target, async () => ({}));
-      await stack.destroy({ color: "never", onEvent: (event) => forward(event, onProgress) });
+      await stack
+        .destroy({ color: "never", onEvent: (event) => forward(event, onProgress) })
+        .catch((error: unknown) => Promise.reject(new Error(engineFailureMessage(error))));
     },
     async removeStack(target) {
       const stack = await stackFor(target, async () => ({}));
-      await stack.workspace.removeStack(target.stack);
+      await stack.workspace.removeStack(target.stack).catch((error: unknown) => Promise.reject(new Error(engineFailureMessage(error))));
     },
   };
+}
+
+// A failed Pulumi command carries its whole transcript; the developer gets
+// its error lines, or its last line when it marked none as errors. The
+// resource failures themselves come through the events. The SDK's
+// CommandError is recognised by shape, so this module never loads the SDK
+// to name it.
+export function engineFailureMessage(error: unknown): string {
+  let reason = error instanceof Error ? error.message : String(error);
+  const stderr = isCommandError(error) ? error.commandResult.stderr : undefined;
+  if (stderr !== undefined) {
+    const lines = stderr.split("\n").map((line) => line.trim()).filter((line) => line !== "");
+    const errors = lines.filter((line) => line.startsWith("error: ")).map((line) => line.slice("error: ".length));
+    reason = errors.length > 0 ? errors.join("; ") : (lines.at(-1) ?? reason);
+  }
+  return `the deploy engine stopped: ${reason}`;
+}
+
+function isCommandError(error: unknown): error is Error & { commandResult: { stderr: string } } {
+  return error instanceof Error && error.name === "CommandError" && typeof (error as { commandResult?: { stderr?: unknown } }).commandResult?.stderr === "string";
 }
 
 function forward(event: EngineEvent, onProgress: (event: ProgressEvent) => void) {
@@ -82,14 +106,17 @@ export function progressFromEngineEvent(event: EngineEvent): ProgressEvent | und
   if (resource) {
     const { type, op, urn } = resource.metadata;
     if (internalTypes.test(type)) return undefined;
-    return { phase: resource.phase, operation: op, type, name: urn.slice(urn.lastIndexOf("::") + 2) };
+    return { phase: resource.phase, operation: op, type, name: resourceName(urn) };
   }
   if (event.diagnosticEvent) {
-    const { severity, message } = event.diagnosticEvent;
-    return severity === "warning" || severity === "error" ? { phase: "diagnostic", severity, message } : undefined;
+    const { severity, message, urn } = event.diagnosticEvent;
+    if (severity !== "warning" && severity !== "error") return undefined;
+    return urn ? { phase: "diagnostic", severity, name: resourceName(urn), message } : { phase: "diagnostic", severity, message };
   }
   if (event.summaryEvent) {
     return { phase: "summary", changes: event.summaryEvent.resourceChanges, durationSeconds: event.summaryEvent.durationSeconds };
   }
   return undefined;
 }
+
+const resourceName = (urn: string) => urn.slice(urn.lastIndexOf("::") + 2);

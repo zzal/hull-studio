@@ -19,7 +19,7 @@ export function awsAccount(): ProviderAccount {
       } catch (error) {
         const cause = error instanceof Error ? error.message : String(error);
         throw new Error(
-          `no AWS credentials found for profile "${profile()}" in region ${region} (${cause}); log in with the AWS CLI or set AWS_PROFILE, then run \`hull deploy\` again`,
+          `no usable AWS credentials for profile "${profile()}" in region ${region}, missing or expired (${cause}); log in with the AWS CLI or set AWS_PROFILE, then run \`hull deploy\` again`,
         );
       }
       if (!account) throw new Error(`AWS answered without an account id for profile "${profile()}" in region ${region}`);
