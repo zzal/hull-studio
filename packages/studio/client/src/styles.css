@@ -97,6 +97,68 @@ body {
 .usage {
   margin: 8px 0;
   color: #4b5563;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-start;
+}
+
+.usage .note {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 150px;
+}
+
+.field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  color: #1f2430;
+  border: 1px solid #c9ceda;
+  border-radius: 4px;
+}
+
+.field input[aria-invalid="true"] {
+  border-color: #c2410c;
+}
+
+.field-diagnostics {
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: #8a1f11;
+  font-size: 12px;
+}
+
+.choice {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.choice button {
+  font: inherit;
+  font-size: 12px;
+  color: white;
+  background: #1d4ed8;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.choice button:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .note {

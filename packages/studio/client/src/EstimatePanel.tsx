@@ -1,5 +1,7 @@
 import { useState } from "react";
+import type { Refusal, UsageField } from "../../src/edits.js";
 import type { EstimateResponse } from "./api.js";
+import { EditableNumber } from "./EditableNumber.js";
 
 const money = (amount: number) => `$${amount.toFixed(2)}`;
 
@@ -8,11 +10,14 @@ type Props = {
   environment: string;
   onEnvironmentChange: (environment: string) => void;
   estimate?: EstimateResponse;
+  // Sends a usage profile edit; resolves with the refusal to show under the field.
+  onUsageChange: (field: UsageField, value: number) => Promise<Refusal>;
 };
 
 // Per intent and in total, low / expected / high a month, with the free
-// tier toggled on or off.
-export function EstimatePanel({ environments, environment, onEnvironmentChange, estimate }: Props) {
+// tier toggled on or off. The usage profile the figures are relative to is
+// editable: the two numbers are the dashboard's way into the file.
+export function EstimatePanel({ environments, environment, onEnvironmentChange, estimate, onUsageChange }: Props) {
   const [freeTier, setFreeTier] = useState(false);
   const figure = freeTier ? "withFreeTier" : "withoutFreeTier";
 
@@ -36,10 +41,23 @@ export function EstimatePanel({ environments, environment, onEnvironmentChange, 
       </header>
       {estimate && (
         <>
-          <p className="usage">
-            {estimate.usage.requestsPerMonth.toLocaleString("en-US")} requests and {estimate.usage.storageGb} GB a month
-            {freeTier && <span className="note"> · {estimate.freeTierLabel}</span>}
-          </p>
+          <div className="usage">
+            {/* Keyed by environment: a draft typed for one is dropped on switching to another. */}
+            <EditableNumber
+              key={`${environment}.requestsPerMonth`}
+              label="requests a month"
+              value={estimate.usage.requestsPerMonth}
+              onCommit={(value) => onUsageChange("requestsPerMonth", value)}
+            />
+            <EditableNumber
+              key={`${environment}.storageGb`}
+              label="GB stored"
+              value={estimate.usage.storageGb}
+              step="any"
+              onCommit={(value) => onUsageChange("storageGb", value)}
+            />
+            {freeTier && <p className="note">{estimate.freeTierLabel}</p>}
+          </div>
           <table>
             <thead>
               <tr>

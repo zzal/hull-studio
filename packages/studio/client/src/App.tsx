@@ -1,7 +1,9 @@
-import type { Blueprint, Diagnostic } from "@hull/blueprint";
-import { useEffect, useState } from "react";
+import type { Blueprint, Diagnostic, Op } from "@hull/blueprint";
+import { useCallback, useEffect, useState } from "react";
+import { refusalAt, resolutionEdit, usageEdit, type Refusal, type UsageField } from "../../src/edits.js";
 import {
   listenForChanges,
+  patchBlueprint,
   readBlueprint,
   readEstimate,
   readRecommendations,
@@ -20,7 +22,9 @@ const defaultEnvironment = "dev";
 // environment, the recommendations for it. Everything is refetched on the
 // studio's "changed" signal, so an edit in an IDE shows within a second. A
 // broken edit shows its diagnostics in a banner over the last valid model,
-// which stays until the file is valid again.
+// which stays until the file is valid again. The two editable fields send
+// one operation each; the studio writes the file, and the "changed" signal
+// brings the new figures back like any other edit.
 export function App() {
   const [blueprint, setBlueprint] = useState<Blueprint>();
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
@@ -32,6 +36,19 @@ export function App() {
   const [version, setVersion] = useState(0);
 
   useEffect(() => listenForChanges(() => setVersion((v) => v + 1)), []);
+
+  // One edit, sent as is: resolves with the refusal to show next to the
+  // field, nothing when the studio accepted it. The reload is not left to the
+  // file watcher alone, so the figures update even when the signal is late.
+  const edit = useCallback(async (op: Op): Promise<Refusal> => {
+    try {
+      await patchBlueprint([op]);
+      setVersion((v) => v + 1);
+      return [];
+    } catch (error) {
+      return error instanceof RouteError ? refusalAt(op.path, error.response) : ["the studio is not answering"];
+    }
+  }, []);
 
   useEffect(() => {
     // A load overtaken by a newer one, or by an environment switch, must not
@@ -93,11 +110,17 @@ export function App() {
             environment={environment}
             onEnvironmentChange={setEnvironment}
             estimate={estimate}
+            onUsageChange={(field: UsageField, value: number) => edit(usageEdit(blueprint, environment, field, value))}
           />
         )}
         {recommendations &&
           Object.entries(recommendations.intents).map(([intent, recommendation]) => (
-            <RecommendationCard key={intent} intent={intent} recommendation={recommendation} />
+            <RecommendationCard
+              key={intent}
+              intent={intent}
+              recommendation={recommendation}
+              onResolutionChange={(resolution) => edit(resolutionEdit(intent, resolution))}
+            />
           ))}
       </aside>
     </main>

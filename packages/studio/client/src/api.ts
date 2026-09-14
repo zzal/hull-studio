@@ -1,4 +1,4 @@
-import type { LoadResult } from "@hull/blueprint";
+import type { LoadResult, Op } from "@hull/blueprint";
 import type { ErrorResponse, EstimateResponse, RecommendationsResponse } from "../../src/index.js";
 
 export type { ErrorResponse, EstimateResponse, LoadResult, RecommendationsResponse };
@@ -15,12 +15,13 @@ export class RouteError extends Error {
   }
 }
 
-async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path);
+async function parse<T>(response: Response): Promise<T> {
   const body = (await response.json()) as T | ErrorResponse;
   if (!response.ok) throw new RouteError(response.status, body as ErrorResponse);
   return body as T;
 }
+
+const getJson = async <T>(path: string) => parse<T>(await fetch(path));
 
 export const readBlueprint = () => getJson<LoadResult>("/blueprint");
 export const readEstimate = (environment: string) =>
@@ -54,4 +55,13 @@ export function listenForChanges(onChanged: () => void): () => void {
     stopped = true;
     socket?.close();
   };
+}
+
+// PUT /blueprint with the operations; the studio writes the file only when
+// the result is valid, and answers as GET /blueprint would afterwards. A
+// refused edit rejects with the RouteError carrying the diagnostics.
+export async function patchBlueprint(ops: Op[]): Promise<LoadResult> {
+  return parse<LoadResult>(
+    await fetch("/blueprint", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(ops) }),
+  );
 }

@@ -319,3 +319,38 @@ describe("PUT /blueprint rejections", () => {
     expect(await response.json()).toEqual({ error: `no hull.yaml in ${directory}` });
   });
 });
+
+describe("PUT /blueprint with the dashboard's edits", () => {
+  // The two editable fields of v0 (issue #8), as the dashboard sends them.
+  it("changes an environment's own usage line and nothing else", async () => {
+    const { status, body, file } = await apply(handFormattedBlueprint, [
+      { op: "set", path: ["environments", "prod", "usage", "requestsPerMonth"], value: 3000000 },
+    ]);
+
+    expect(status).toBe(200);
+    expect(body.blueprint?.environments.prod?.usage).toEqual({ requestsPerMonth: 3000000 });
+    expect(lineDiff(handFormattedBlueprint, file)).toEqual({
+      removed: ["      requestsPerMonth: 2000000"],
+      added: ["      requestsPerMonth: 3000000"],
+    });
+    expect(comments(file)).toEqual(comments(handFormattedBlueprint));
+  });
+
+  it("changes the storage line and nothing else", async () => {
+    const { status, file } = await apply(handFormattedBlueprint, [{ op: "set", path: ["usage", "storageGb"], value: 2.5 }]);
+
+    expect(status).toBe(200);
+    expect(lineDiff(handFormattedBlueprint, file)).toEqual({ removed: ["  storageGb: 1"], added: ["  storageGb: 2.5"] });
+    expect(comments(file)).toEqual(comments(handFormattedBlueprint));
+  });
+
+  it("rejects a negative usage number with a diagnostic at the field and leaves the file byte-identical", async () => {
+    const { status, body, file } = await patch<ErrorResponse>(handFormattedBlueprint, [
+      { op: "set", path: ["usage", "requestsPerMonth"], value: -1 },
+    ]);
+
+    expect(status).toBe(422);
+    expect(body.diagnostics).toEqual([{ path: ["usage", "requestsPerMonth"], message: "Too small: expected number to be >=0" }]);
+    expect(file).toBe(handFormattedBlueprint);
+  });
+});
