@@ -88,6 +88,7 @@ describe("the program for the sample blueprint merged for prod", () => {
         "aws:apigatewayv2/integration:Integration",
         "aws:apigatewayv2/route:Route",
         "aws:apigatewayv2/stage:Stage",
+        "aws:cloudwatch/logGroup:LogGroup",
         "aws:ec2/securityGroup:SecurityGroup",
         "aws:ec2/securityGroup:SecurityGroup",
         "aws:ec2/securityGroupRule:SecurityGroupRule",

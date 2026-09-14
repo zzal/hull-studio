@@ -15,8 +15,11 @@ dist/
 *.tsbuildinfo
 coverage/
 
-# Hull working state written by the CLI (bindings, deploy state); never hand-edited
-.hull/
+# Hull working state written by the CLI, never hand-edited: the generated
+# bindings and the deploy secrets passphrase stay out; .hull/state.json is
+# committed so a second machine deploys against the same state bucket
+**/.hull/bindings/
+**/.hull/passphrase
 
 # Per-developer environment (direnv); holds AWS credentials, never committed
 .envrc

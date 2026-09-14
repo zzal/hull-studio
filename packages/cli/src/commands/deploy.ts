@@ -1,18 +1,14 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { blueprintFileName, loadBlueprint, type Blueprint } from "@hull/blueprint";
+import { blueprintFileName } from "@hull/blueprint";
 import { writeBindings } from "@hull/compiler/bindings";
-import { resolveEnvironment, vocabulary } from "@hull/compiler/resolve";
 import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
 import { awsAccount } from "../deploy/aws-account.js";
-import type { StackTarget } from "../deploy/engine.js";
+import { loadEnvironment, readLocalState, stackTarget } from "../deploy/environment.js";
 import { renderProgress } from "../deploy/progress.js";
 import { pulumiEngine } from "../deploy/pulumi-engine.js";
-import { generatePassphrase, passphraseFileName, readPassphrase, readState, stateFileName, writeState } from "../deploy/state.js";
-
-// The state bucket in the developer's account, one per account and region.
-const stateBucketName = (account: string, region: string) => `hull-state-${account}-${region}`;
+import { generatePassphrase, passphraseFileName, stateBucketName, stateFileName, writeState } from "../deploy/state.js";
 
 export function deployCommand({ cwd, output, engine = pulumiEngine(), provider = awsAccount() }: CommandContext) {
   return defineCommand({
@@ -32,12 +28,8 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
       // the blueprint could deploy: the engine, the blueprint, its entry
       // files, the passphrase. Then the account.
       await engine.check();
-      const blueprint = loadValidBlueprint(cwd);
-      const merged = resolveEnvironment(blueprint, args.env);
-      if (!merged) {
-        const names = Object.keys(blueprint.environments).join(", ");
-        throw new Error(`no environment "${args.env}" in ${blueprintFileName}; environments are ${names}`);
-      }
+      const environment = loadEnvironment(cwd, args.env);
+      const { blueprint, merged } = environment;
       const entries = Object.entries(blueprint.intents).flatMap(([name, intent]) =>
         intent.kind === "http-api" ? [{ name, entry: intent.entry }] : [],
       );
@@ -46,13 +38,8 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
           throw new Error(`no entry ${entry} for intent ${name}; ${blueprintFileName} points at a file that does not exist`);
         }
       }
-      const recorded = readState(cwd);
-      let passphrase = readPassphrase(cwd);
-      if (recorded && passphrase === undefined) {
-        throw new Error(
-          `no ${passphraseFileName}, but ${stateFileName} records the state bucket ${recorded.stateBucket}: this environment was deployed before and its state is locked with that passphrase. Copy ${passphraseFileName} from the machine that first deployed; Hull never regenerates it.`,
-        );
-      }
+      const { recorded, passphrase: existingPassphrase } = readLocalState(cwd);
+      let passphrase = existingPassphrase;
 
       const { account, profile } = await provider.identity(blueprint.region);
       output(`Deploying ${blueprint.name} to ${args.env} in ${blueprint.region} (account ${account}, profile ${profile}).`);
@@ -80,14 +67,7 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
       );
       const program = compileProgram({ blueprint: merged, bundles });
 
-      const target: StackTarget = {
-        project: blueprint.name,
-        stack: args.env,
-        region: blueprint.region,
-        backendUrl: `s3://${stateBucket}?region=${blueprint.region}`,
-        passphrase,
-      };
-      const outputs = await engine.up(target, program, (event) => output(renderProgress(event)));
+      const outputs = await engine.up(stackTarget(environment, stateBucket, passphrase), program, (event) => output(renderProgress(event)));
 
       const apiUrl = outputs.apiUrl;
       if (typeof apiUrl === "string") {
@@ -96,15 +76,4 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
       }
     },
   });
-}
-
-function loadValidBlueprint(directory: string): Blueprint {
-  const path = join(directory, blueprintFileName);
-  if (!existsSync(path)) throw new Error(`no ${blueprintFileName} in ${directory}; run \`hull init\` first`);
-  const loaded = loadBlueprint(readFileSync(path, "utf8"), vocabulary);
-  if (!loaded.blueprint) {
-    const lines = loaded.diagnostics.map(({ path, message }) => `  ${path.length > 0 ? path.join(".") : "(file)"}: ${message}`);
-    throw new Error(`${blueprintFileName} is not valid:\n${lines.join("\n")}`);
-  }
-  return loaded.blueprint;
 }

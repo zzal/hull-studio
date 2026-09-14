@@ -11,6 +11,9 @@ const hullDirectory = ".hull";
 export const stateFileName = join(hullDirectory, "state.json");
 export const passphraseFileName = join(hullDirectory, "passphrase");
 
+// The state bucket in the developer's account, one per account and region.
+export const stateBucketName = (account: string, region: string) => `hull-state-${account}-${region}`;
+
 const stateSchema = z.object({ stateBucket: z.string().min(1) });
 export type DeployState = z.infer<typeof stateSchema>;
 

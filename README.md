@@ -88,6 +88,23 @@ later secrets provider. The blueprint is then compiled, the bindings
 regenerated, the tier bundled, and the program run through the deploy engine
 with one line per resource event and a summary, ending with the API URL.
 
+`hull destroy --env <name>` is the other half: the same pre-flight minus the
+entry files, then the engine removes every resource of the environment with
+the same per-resource lines and summary, and removes the environment's state
+from the backend. The state bucket, `.hull/state.json` and `.hull/passphrase`
+are kept, so the next deploy is a first deploy on the same bucket and
+passphrase. A directory with no state file has nothing to destroy and the
+command says so before any cloud call. The program is written so that destroy
+leaves nothing behind but the state bucket: the database takes no final
+snapshot, and the Lambda's log group is declared rather than left for the
+runtime to create outside the state.
+
+Deploying twice on an unchanged blueprint is a no-op: the compiled program
+declares the same resources with the same inputs and the bundle is
+byte-identical, so Pulumi reports every resource unchanged. The test suite
+checks this by running the program handed to the fake engine under Pulumi's
+mock runtime on both runs and comparing what it declared.
+
 The deploy engine is a small interface (`check`, `up`, `destroy`,
 `removeStack`, a progress callback) in `packages/cli/src/deploy/engine.ts`,
 implemented over the Pulumi Automation API as the second spike settled it:
@@ -126,12 +143,20 @@ hull destroy --env dev    # everything gone, bill stays near zero
 ```
 
 This path touches real AWS and is a manual test, not an automated one. The
-automated suite never needs credentials or the network. `examples/todos`
+automated suite never needs credentials or the network. Run the script twice
+in the same directory: the second `hull deploy` finds the state bucket and
+the passphrase from the first run, creates everything again from scratch
+because `hull destroy` removed the stack, and `hull destroy` ends it again.
+Afterwards, `aws s3 ls` shows the state bucket and nothing else, and the RDS,
+Lambda and API Gateway consoles are empty. `examples/todos`
 already carries its `hull.yaml` (the sample `hull init` writes, with the schema
 comments pointing at the workspace's own schema file), so the script starts at
 `hull studio` there; `hull init` is for a fresh directory.
 
-Cost of a run: RDS `db.t4g.micro` is about two cents an hour, Lambda and API
-Gateway sit in the free tier at demo traffic, the S3 state bucket is cents,
-and there is no NAT gateway by design. Never leave the dev environment up
-overnight; `hull destroy` ends every run.
+Cost of a run: RDS `db.t4g.micro` is about two cents an hour (about $12 a
+month if left up), Lambda and API Gateway sit in the free tier at demo
+traffic, the S3 state bucket is cents, and there is no NAT gateway by design.
+A deploy takes five to ten minutes, most of it the RDS instance; a destroy
+takes a few minutes for the same reason. Never leave the dev environment up
+overnight: `hull destroy --env dev` ends every run, and the state bucket it
+keeps costs nothing worth mentioning.

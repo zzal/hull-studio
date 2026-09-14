@@ -33,6 +33,7 @@ const postgresPort = 5432;
 const bundleFileName = "index.mjs";
 // The AWS-managed policy that lets a Lambda attach to a VPC and write logs.
 const vpcAccessPolicyArn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole";
+const logRetentionDays = 14;
 
 // Refuses up front, before any resource is declared, what the program could
 // not deploy; the program itself only runs inside a Pulumi stack.
@@ -187,6 +188,9 @@ function declareLambdaApi(
     variables[names.passwordArn] = database.secretArn;
   }
 
+  // The Lambda's own log group, declared rather than left for the runtime
+  // to create on first invocation: what the stack creates, destroy removes.
+  const logs = new aws.cloudwatch.LogGroup(name, { retentionInDays: logRetentionDays });
   const lambda = new aws.lambda.Function(name, {
     runtime: nodeRuntime,
     handler: "index.handler",
@@ -196,6 +200,7 @@ function declareLambdaApi(
     timeout: sizing.timeoutSeconds,
     vpcConfig: { subnetIds: network.subnetIds, securityGroupIds: [group.id] },
     environment: { variables },
+    loggingConfig: { logFormat: "Text", logGroup: logs.name },
   });
 
   const api = new aws.apigatewayv2.Api(name, { protocolType: "HTTP" });
