@@ -22,11 +22,15 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1131.0",
+    "@aws-sdk/client-sts": "^3.1131.0",
     "@hull/blueprint": "workspace:*",
     "@hull/compiler": "workspace:*",
     "@hull/studio": "workspace:*",
+    "@pulumi/pulumi": "^3.262.0",
     "citty": "^0.2.2",
-    "open": "^11.0.3"
+    "open": "^11.0.3",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "yaml": "^2.9.1"

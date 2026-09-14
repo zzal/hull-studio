@@ -73,6 +73,29 @@ ships its `hull.yaml`; `pnpm typecheck` there regenerates the bindings first
 (`pnpm bindings`), and `tests/todos-example.test.ts` bundles the entry and
 typechecks the example against them.
 
+`hull deploy --env <name>` runs the milestone's deploy path. Pre-flight, before
+any cloud call: the Pulumi CLI is present, the blueprint is valid, every entry
+file exists, and the passphrase is consistent with the state file. Then the
+AWS identity is resolved from the ambient profile, the state bucket
+`hull-state-<account>-<region>` is created if missing (region location
+constraint, public access blocked, versioning on) and recorded in
+`.hull/state.json`, which is committed so a second machine deploys against the
+same state. The deploy secrets passphrase is generated on the first deploy into
+the gitignored `.hull/passphrase`; a missing passphrase on a repository whose
+state file already records a bucket is an error, never a silent regeneration.
+The passphrase in a repository folder is a PoC choice; KMS is the intended
+later secrets provider. The blueprint is then compiled, the bindings
+regenerated, the tier bundled, and the program run through the deploy engine
+with one line per resource event and a summary, ending with the API URL.
+
+The deploy engine is a small interface (`check`, `up`, `destroy`,
+`removeStack`, a progress callback) in `packages/cli/src/deploy/engine.ts`,
+implemented over the Pulumi Automation API as the second spike settled it:
+the project backend URL points at the state bucket and overrides any Pulumi
+Cloud login, the region is set in both the process environment and the
+provider config, credentials come from the ambient AWS profile. Tests use a
+fake engine and a fake account and never reach the network.
+
 ## Developing
 
 Requires Node 22 or later and pnpm 10 (`corepack enable` picks the pinned

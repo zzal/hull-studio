@@ -14,6 +14,11 @@
       "@hull/source": "./src/bindings.ts",
       "types": "./dist/bindings.d.ts",
       "import": "./dist/bindings.js"
+    },
+    "./resolve": {
+      "@hull/source": "./src/resolve.ts",
+      "types": "./dist/resolve.d.ts",
+      "import": "./dist/resolve.js"
     }
   },
   "files": [
