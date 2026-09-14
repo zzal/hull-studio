@@ -5,14 +5,18 @@ what their application needs than learn a cloud. You write intents in
 `hull.yaml`, Hull picks and sizes the resources, shows you the cost, and deploys
 with Pulumi into your own account.
 
-See `CONTEXT.md` for the vocabulary, `docs/adr/` for the decisions, and
-`docs/milestones/` for the plans.
+See `CONTEXT.md` for the vocabulary, `docs/adr/` for the decisions,
+`docs/milestones/` for the plans, and `docs/running.md` for how to build,
+run and demo.
 
 ## Status
 
-Milestone 1, proof of concept: two intents (an HTTP API on Lambda plus API
-Gateway, and a relational database on RDS Postgres) end to end, happy path
-only. Everything else in the glossary is later.
+Milestone 1, proof of concept, is done: two intents (an HTTP API on Lambda
+plus API Gateway, and a relational database on RDS Postgres) end to end,
+happy path only, with the demo script run twice on a clean account.
+Milestone 2 (`docs/milestones/02-queue-worker-environments.md`) adds a
+queue, a background worker, editing intents and overrides in the studio,
+and a second environment. Everything else in the glossary is later.
 
 ## Repository layout
 
