@@ -141,9 +141,22 @@ describe("hull studio", () => {
     await expect(fetch(`${opened}/blueprint`)).rejects.toThrow();
   });
 
-  it("refuses to start without a blueprint and says what to run", async () => {
+  // The start screen: the studio starts without a blueprint and the
+  // dashboard creates one through the server.
+  it("starts without a blueprint, and serves the create route", async () => {
     const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));
+    const { url } = runStudio(directory);
+    const opened = await url;
 
-    await expect(runStudio(directory).done).rejects.toThrow(`no hull.yaml in ${directory}; run \`hull init\` first`);
+    expect((await fetch(`${opened}/blueprint`)).status).toBe(404);
+    const created = await fetch(`${opened}/blueprint`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ template: "api-database" }),
+    });
+
+    expect(created.status).toBe(201);
+    expect(readFileSync(join(directory, "hull.yaml"), "utf8")).toContain("name: todos");
+    expect(readFileSync(join(directory, ".hull", "bindings", "index.ts"), "utf8")).toContain("export const db");
   });
 });

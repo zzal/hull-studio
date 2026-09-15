@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createStudioServer } from "@hull/studio";
 import { runCommand } from "citty";
@@ -54,10 +54,10 @@ const neverOpens = async () => {
   throw new Error("init must not open a browser");
 };
 
-async function runInit(directory: string) {
+async function runInit(directory: string, args: string[] = []) {
   const lines: string[] = [];
   await runCommand(createHull({ cwd: directory, output: (line) => lines.push(line), openBrowser: neverOpens }), {
-    rawArgs: ["init"],
+    rawArgs: ["init", ...args],
   });
   return lines;
 }
@@ -125,6 +125,42 @@ describe("hull init", () => {
 
     expect(readFileSync(join(directory, "hull.yaml"), "utf8")).toBe("name: mine\n");
     expect(existsSync(join(directory, ".gitignore"))).toBe(false);
+  });
+
+  it("writes the blank template on --template blank, named after the directory", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "hull-init-"));
+
+    const lines = await runInit(directory, ["--template", "blank"]);
+
+    const written = readFileSync(join(directory, "hull.yaml"), "utf8");
+    expect(written).toBe(`# $schema: ${schemaUrl}
+# yaml-language-server: $schema=${schemaUrl}
+
+name: ${basename(directory)}
+provider: aws
+region: us-east-1
+
+usage:
+  requestsPerMonth: 100000
+  storageGb: 1
+
+intents: {}
+
+environments:
+  dev: {}
+`);
+    expect(parseDocument(written).toString()).toBe(written);
+    expect(lines[0]).toBe(`Wrote hull.yaml: a blueprint named after this folder, on aws in us-east-1, with no intents and a dev environment.`);
+  });
+
+  it("refuses an unknown template, naming the templates", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "hull-init-"));
+
+    await expect(runInit(directory, ["--template", "microservices"])).rejects.toThrow(
+      '"microservices" is not a template; templates are api-database, blank',
+    );
+
+    expect(existsSync(join(directory, "hull.yaml"))).toBe(false);
   });
 
   it("tells the developer what it wrote and what to run next", async () => {

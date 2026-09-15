@@ -1,6 +1,3 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { blueprintFileName } from "@hull/blueprint";
 import { writeBindings } from "@hull/compiler/bindings";
 import { startStudio } from "@hull/studio";
 import { defineCommand } from "citty";
@@ -10,7 +7,7 @@ export function studioCommand({ cwd, output, openBrowser, signal }: CommandConte
   return defineCommand({
     meta: {
       name: "studio",
-      description: "Open the dashboard for the blueprint in this directory",
+      description: "Open the dashboard for the blueprint in this directory, or a start screen when there is none",
     },
     args: {
       port: {
@@ -19,9 +16,6 @@ export function studioCommand({ cwd, output, openBrowser, signal }: CommandConte
       },
     },
     async run({ args }) {
-      if (!existsSync(join(cwd, blueprintFileName))) {
-        throw new Error(`no ${blueprintFileName} in ${cwd}; run \`hull init\` first`);
-      }
       const port = args.port === undefined ? 0 : Number(args.port);
       if (!Number.isInteger(port) || port < 0 || port > 65535) {
         throw new Error(`"${args.port}" is not a port number`);

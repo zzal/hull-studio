@@ -30,6 +30,7 @@ import {
   type SizedIntent,
 } from "@hull/catalog";
 import { Hono, type Context } from "hono";
+import { BlueprintExistsError, createBlueprint, isTemplateName, notATemplate, templateNames, templates } from "./templates.js";
 
 export type StudioOptions = {
   // Directory holding hull.yaml.
@@ -86,6 +87,28 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
   app.get("/blueprint", (c) => {
     const loaded = read();
     return loaded ? c.json(loaded) : missingBlueprint(c);
+  });
+
+  // The templates the start screen offers.
+  app.get("/templates", (c) => c.json(templates));
+
+  // POST /blueprint with a template name: writes the first hull.yaml, with
+  // the .gitignore entries, and answers as GET /blueprint would afterwards.
+  // Refused when the file exists; the studio never overwrites a blueprint.
+  app.post("/blueprint", async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as { template?: unknown } | undefined;
+    const template = body?.template;
+    if (template === undefined) return c.json({ error: `body must name a template: ${templateNames.join(", ")}` }, 400);
+    if (!isTemplateName(template)) return c.json({ error: notATemplate(String(template)) }, 400);
+    try {
+      createBlueprint(directory, template);
+    } catch (error) {
+      if (error instanceof BlueprintExistsError) return c.json({ error: error.message }, 409);
+      throw error;
+    }
+    const loaded = read()!;
+    if (loaded.blueprint) onWrite?.(loaded.blueprint);
+    return c.json(loaded, 201);
   });
 
   // PUT /blueprint with a list of operations: applied to the current text,
