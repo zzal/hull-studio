@@ -356,6 +356,7 @@ describe("GET /estimate for the milestone 2 demo blueprint", () => {
         },
         { resource: "log group", ...noCharge },
         { resource: "execution role", ...noCharge },
+        { resource: "security group", ...noCharge },
         { resource: "event source mapping", ...noCharge },
       ],
     });

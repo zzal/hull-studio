@@ -1,11 +1,20 @@
-import { sizingValues, type MergedBlueprint, type MergedIntent } from "@hull/blueprint";
-import { lambdaSizingSchema, rdsSizingSchema, type LambdaSizing, type RdsSizing } from "@hull/catalog";
+import { isTier, sizingValues, type MergedBlueprint, type MergedIntent } from "@hull/blueprint";
+import {
+  lambdaSizingSchema,
+  lambdaWorkerSizingSchema,
+  rdsSizingSchema,
+  sqsSizingSchema,
+  type LambdaSizing,
+  type LambdaWorkerSizing,
+  type RdsSizing,
+  type SqsSizing,
+} from "@hull/catalog";
 import * as aws from "@pulumi/aws";
 import * as pulumi from "@pulumi/pulumi";
 import type { z } from "zod";
 import { nodeRuntime, type Bundle } from "./bundle.js";
 import { CompileError } from "./errors.js";
-import { databaseLinkVariables } from "./link.js";
+import { databaseLinkVariables, queueLinkVariables } from "./link.js";
 
 // The compiler's input: the blueprint merged for one environment, sizing
 // included, and the bundle of every tier, by intent name.
@@ -19,46 +28,64 @@ export type CompileInput = {
 export type Program = () => Promise<StackOutputs>;
 export type StackOutputs = { apiUrl?: pulumi.Output<string> };
 
-// What v0 deploys: rds-postgres and lambda-api-gateway on a default VPC, and
-// the read-write link between them as one security group rule, one IAM
-// statement and the HULL_<INTENT>_* variables on the Lambda. No NAT gateway:
-// the Lambda only needs the database.
-type Target = "database" | "lambda";
+// What this version deploys: rds-postgres, sqs-standard, and the two Lambda
+// tiers, on a default VPC. A tier is attached to the VPC only when it links
+// a database; a link is one IAM statement set and the HULL_<INTENT>_*
+// variables on the tier, plus for a database the security group rule that
+// lets the tier in. No NAT gateway (ADR 0008).
+type Target = "database" | "queue" | "api" | "worker";
 const deployable: Record<string, Target | undefined> = {
   "rds-postgres": "database",
-  "lambda-api-gateway": "lambda",
+  "sqs-standard": "queue",
+  "lambda-api-gateway": "api",
+  "lambda-worker": "worker",
 };
 
 const postgresPort = 5432;
 const bundleFileName = "index.mjs";
-// The AWS-managed policy that lets a Lambda attach to a VPC and write logs.
+// The AWS-managed policies that let a Lambda write logs, with and without a
+// VPC attachment.
 const vpcAccessPolicyArn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole";
+const basicExecutionPolicyArn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole";
 const logRetentionDays = 14;
+// Every queue redrives to its dead-letter queue after this many receives,
+// and the dead-letter queue keeps a message this long.
+const deadLetterMaxReceiveCount = 5;
+const deadLetterRetentionDays = 14;
+const secondsPerDay = 24 * 3600;
+
+type Link = { to: string; role: string };
+type Tier = { name: string; kind: "api" | "worker"; sizing: LambdaSizing | LambdaWorkerSizing; bundle: Bundle; links: Link[] };
 
 // Refuses up front, before any resource is declared, what the program could
 // not deploy; the program itself only runs inside a Pulumi stack.
 export function compileProgram({ blueprint, bundles }: CompileInput): Program {
   const databases: { name: string; sizing: RdsSizing }[] = [];
-  const lambdas: { name: string; sizing: LambdaSizing; bundle: Bundle; links: string[] }[] = [];
+  const queues: { name: string; sizing: SqsSizing }[] = [];
+  const tiers: Tier[] = [];
   for (const [name, intent] of Object.entries(blueprint.intents)) {
     const target = deployable[intent.resolution];
     if (!target) throw new CompileError(`intent "${name}" resolves to ${intent.resolution}, which is not deployable in this version`);
     if (target === "database") {
       databases.push({ name, sizing: sizingOf(rdsSizingSchema, name, intent) });
+    } else if (target === "queue") {
+      queues.push({ name, sizing: sizingOf(sqsSizingSchema, name, intent) });
     } else {
       const bundle = bundles[name];
       if (bundle === undefined) throw new CompileError(`no bundle for intent "${name}"`);
-      const links = intent.kind === "http-api" ? (intent.links ?? []).map((link) => link.to) : [];
-      lambdas.push({ name, sizing: sizingOf(lambdaSizingSchema, name, intent), bundle, links });
+      const links = isTier(intent) ? (intent.links ?? []) : [];
+      const sizing = target === "api" ? sizingOf(lambdaSizingSchema, name, intent) : sizingOf(lambdaWorkerSizingSchema, name, intent);
+      tiers.push({ name, kind: target, sizing, bundle, links });
     }
   }
-  if (lambdas.length > 1) {
-    throw new CompileError(`this version deploys one http-api intent; the blueprint has ${lambdas.map(({ name }) => name).join(", ")}`);
+  const apis = tiers.filter((tier) => tier.kind === "api");
+  if (apis.length > 1) {
+    throw new CompileError(`this version deploys one http-api intent; the blueprint has ${apis.map(({ name }) => name).join(", ")}`);
   }
-  for (const { name, links } of lambdas) {
-    for (const to of links) {
-      if (!databases.some((database) => database.name === to)) {
-        throw new CompileError(`intent "${name}" links to "${to}", which is not a database this version deploys`);
+  for (const { name, links } of tiers) {
+    for (const { to } of links) {
+      if (!databases.some((database) => database.name === to) && !queues.some((queue) => queue.name === to)) {
+        throw new CompileError(`intent "${name}" links to "${to}", which is not a database or a queue this version deploys`);
       }
     }
   }
@@ -68,13 +95,18 @@ export function compileProgram({ blueprint, bundles }: CompileInput): Program {
     const subnets = await aws.ec2.getSubnets({ filters: [{ name: "vpc-id", values: [vpc.id] }] });
     const network = { vpcId: vpc.id, subnetIds: subnets.ids };
 
-    const declared = new Map(
-      databases.map(({ name, sizing }) => [name, declareRdsPostgres(name, sizing, network, blueprint.name)]),
-    );
+    const declaredDatabases = new Map(databases.map(({ name, sizing }) => [name, declareRdsPostgres(name, sizing, network, blueprint.name)]));
+    const declaredQueues = new Map(queues.map(({ name, sizing }) => [name, declareSqsStandard(name, sizing)]));
     const outputs: StackOutputs = {};
-    for (const { name, sizing, bundle, links } of lambdas) {
-      const linked = links.map((to) => ({ to, database: declared.get(to)! }));
-      outputs.apiUrl = declareLambdaApi(name, sizing, bundle, network, linked);
+    for (const tier of tiers) {
+      const linked = tier.links.map((link) => ({
+        ...link,
+        database: declaredDatabases.get(link.to),
+        queue: declaredQueues.get(link.to),
+      }));
+      const lambda = declareTier(tier, network, linked);
+      if (tier.kind === "api") outputs.apiUrl = declareHttpApi(tier.name, lambda);
+      else declareEventSources(tier.name, lambda, tier.sizing as LambdaWorkerSizing, linked);
     }
     return outputs;
   };
@@ -98,6 +130,8 @@ type Database = {
   instance: aws.rds.Instance;
   secretArn: pulumi.Output<string>;
 };
+
+type Queue = { queue: aws.sqs.Queue };
 
 // A Postgres database name is letters, digits and underscores, starting
 // with a letter; the application name is free-form.
@@ -135,23 +169,44 @@ function declareRdsPostgres(name: string, sizing: RdsSizing, network: Network, a
   return { group, instance, secretArn };
 }
 
-type LinkedDatabase = { to: string; database: Database };
-
-// The tier's group may reach anything outbound; each link opens the target
-// group to it on the Postgres port, lets its role read the target's secret,
-// and hands it the connection details as HULL_<INTENT>_* variables.
-function declareLambdaApi(
-  name: string,
-  sizing: LambdaSizing,
-  bundle: Bundle,
-  network: Network,
-  links: LinkedDatabase[],
-): pulumi.Output<string> {
-  const group = new aws.ec2.SecurityGroup(name, {
-    vpcId: network.vpcId,
-    description: `Hull: ${name} tier`,
-    egress: [{ protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }],
+// A standard queue sized as merged, and the dead-letter queue every queue
+// gets: a poison message that blocks a worker forever is the failure a
+// first-time user cannot diagnose. The dead-letter queue is part of what
+// sqs-standard means, not an intent.
+function declareSqsStandard(name: string, sizing: SqsSizing): Queue {
+  const deadLetter = new aws.sqs.Queue(`${name}-dead-letter`, { messageRetentionSeconds: deadLetterRetentionDays * secondsPerDay });
+  const queue = new aws.sqs.Queue(name, {
+    visibilityTimeoutSeconds: sizing.visibilityTimeoutSeconds,
+    messageRetentionSeconds: sizing.retentionDays * secondsPerDay,
+    redrivePolicy: deadLetter.arn.apply((arn) => JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: deadLetterMaxReceiveCount })),
   });
+  return { queue };
+}
+
+type LinkedIntent = Link & { database?: Database; queue?: Queue };
+
+// The IAM statements a link grants its tier: exactly what the role needs,
+// per direction. A consume link also covers what the event source mapping
+// polls with, since the mapping runs under the function's role.
+const queueActions: Record<string, string[]> = {
+  produce: ["sqs:SendMessage"],
+  consume: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
+};
+
+// The tier's role, one policy per link, its log group and the function
+// from its bundle. Attached to the VPC, with a group that may reach
+// anything outbound, only when a database is linked; a tier that only
+// talks to queues stays outside and pays nothing for the attachment.
+function declareTier(tier: Tier, network: Network, links: LinkedIntent[]): aws.lambda.Function {
+  const { name, sizing, bundle } = tier;
+  const inVpc = links.some((link) => link.database !== undefined);
+  const group = inVpc
+    ? new aws.ec2.SecurityGroup(name, {
+        vpcId: network.vpcId,
+        description: `Hull: ${name} tier`,
+        egress: [{ protocol: "-1", fromPort: 0, toPort: 0, cidrBlocks: ["0.0.0.0/0"] }],
+      })
+    : undefined;
 
   const role = new aws.iam.Role(name, {
     assumeRolePolicy: JSON.stringify({
@@ -159,50 +214,65 @@ function declareLambdaApi(
       Statement: [{ Effect: "Allow", Principal: { Service: "lambda.amazonaws.com" }, Action: "sts:AssumeRole" }],
     }),
   });
-  new aws.iam.RolePolicyAttachment(name, { role: role.name, policyArn: vpcAccessPolicyArn });
+  new aws.iam.RolePolicyAttachment(name, { role: role.name, policyArn: inVpc ? vpcAccessPolicyArn : basicExecutionPolicyArn });
 
   const variables: Record<string, pulumi.Input<string>> = {};
-  for (const { to, database } of links) {
-    new aws.ec2.SecurityGroupRule(`${name}-${to}`, {
-      type: "ingress",
-      securityGroupId: database.group.id,
-      sourceSecurityGroupId: group.id,
-      protocol: "tcp",
-      fromPort: postgresPort,
-      toPort: postgresPort,
-    });
-    new aws.iam.RolePolicy(`${name}-${to}`, {
-      role: role.name,
-      policy: database.secretArn.apply((secretArn) =>
-        JSON.stringify({
-          Version: "2012-10-17",
-          Statement: [{ Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: secretArn }],
-        }),
-      ),
-    });
-    const names = databaseLinkVariables(to);
-    variables[names.host] = database.instance.address;
-    variables[names.port] = database.instance.port.apply(String);
-    variables[names.name] = database.instance.dbName;
-    variables[names.user] = database.instance.username;
-    variables[names.passwordArn] = database.secretArn;
+  for (const { to, role: linkRole, database, queue } of links) {
+    if (database) {
+      new aws.ec2.SecurityGroupRule(`${name}-${to}`, {
+        type: "ingress",
+        securityGroupId: database.group.id,
+        sourceSecurityGroupId: group!.id,
+        protocol: "tcp",
+        fromPort: postgresPort,
+        toPort: postgresPort,
+      });
+      new aws.iam.RolePolicy(`${name}-${to}`, {
+        role: role.name,
+        policy: database.secretArn.apply((secretArn) =>
+          JSON.stringify({
+            Version: "2012-10-17",
+            Statement: [{ Effect: "Allow", Action: ["secretsmanager:GetSecretValue"], Resource: secretArn }],
+          }),
+        ),
+      });
+      const names = databaseLinkVariables(to);
+      variables[names.host] = database.instance.address;
+      variables[names.port] = database.instance.port.apply(String);
+      variables[names.name] = database.instance.dbName;
+      variables[names.user] = database.instance.username;
+      variables[names.passwordArn] = database.secretArn;
+    } else if (queue) {
+      const actions = queueActions[linkRole];
+      if (!actions) throw new Error(`no IAM statements for the ${linkRole} role on a queue`);
+      new aws.iam.RolePolicy(`${name}-${to}`, {
+        role: role.name,
+        policy: queue.queue.arn.apply((arn) => JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: actions, Resource: arn }] })),
+      });
+      const names = queueLinkVariables(to);
+      variables[names.url] = queue.queue.url;
+      variables[names.arn] = queue.queue.arn;
+    }
   }
 
   // The Lambda's own log group, declared rather than left for the runtime
   // to create on first invocation: what the stack creates, destroy removes.
   const logs = new aws.cloudwatch.LogGroup(name, { retentionInDays: logRetentionDays });
-  const lambda = new aws.lambda.Function(name, {
+  return new aws.lambda.Function(name, {
     runtime: nodeRuntime,
     handler: "index.handler",
     code: new pulumi.asset.AssetArchive({ [bundleFileName]: new pulumi.asset.StringAsset(bundle.code) }),
     role: role.arn,
     memorySize: sizing.memoryMb,
     timeout: sizing.timeoutSeconds,
-    vpcConfig: { subnetIds: network.subnetIds, securityGroupIds: [group.id] },
+    ...(group && { vpcConfig: { subnetIds: network.subnetIds, securityGroupIds: [group.id] } }),
     environment: { variables },
     loggingConfig: { logFormat: "Text", logGroup: logs.name },
   });
+}
 
+// Every request of an HTTP API routed to the Lambda; the URL is the stack's output.
+function declareHttpApi(name: string, lambda: aws.lambda.Function): pulumi.Output<string> {
   const api = new aws.apigatewayv2.Api(name, { protocolType: "HTTP" });
   const integration = new aws.apigatewayv2.Integration(name, {
     apiId: api.id,
@@ -222,6 +292,21 @@ function declareLambdaApi(
     principal: "apigateway.amazonaws.com",
     sourceArn: pulumi.interpolate`${api.executionArn}/*/*`,
   });
-
   return api.apiEndpoint;
+}
+
+// The worker is fed by every queue it consumes: batch size and maximum
+// concurrency from the sizing, partial batch failures reported so one bad
+// message does not redeliver the good ones of its batch.
+function declareEventSources(name: string, lambda: aws.lambda.Function, sizing: LambdaWorkerSizing, links: LinkedIntent[]): void {
+  for (const { to, role, queue } of links) {
+    if (!queue || role !== "consume") continue;
+    new aws.lambda.EventSourceMapping(`${name}-${to}`, {
+      eventSourceArn: queue.queue.arn,
+      functionName: lambda.name,
+      batchSize: sizing.batchSize,
+      scalingConfig: { maximumConcurrency: sizing.maxConcurrency },
+      functionResponseTypes: ["ReportBatchItemFailures"],
+    });
+  }
 }

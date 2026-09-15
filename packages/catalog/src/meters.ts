@@ -57,7 +57,9 @@ export const resources = {
   "fargate-load-balancer": ["Fargate tasks", "Application Load Balancer"],
   "rds-postgres": ["RDS instance", "gp3 storage", "security group", "managed master password secret"],
   "sqs-standard": ["SQS queue", "dead-letter queue"],
-  "lambda-worker": ["Lambda function", "log group", "execution role", "event source mapping"],
+  // The security group exists only while the worker links a database and
+  // is attached to the VPC; it bills nothing either way.
+  "lambda-worker": ["Lambda function", "log group", "execution role", "security group", "event source mapping"],
   "fargate-worker": ["Fargate tasks"],
 } as const satisfies Record<string, readonly string[]>;
 
