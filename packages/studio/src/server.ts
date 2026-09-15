@@ -34,6 +34,7 @@ import {
   type SizedIntent,
 } from "@hull/catalog";
 import { Hono, type Context } from "hono";
+import { createOperations, isOperationKind, operationKinds, type Operations } from "./operations.js";
 import { BlueprintExistsError, createBlueprint, isTemplateName, notATemplate, templateNames, templates } from "./templates.js";
 
 export type StudioOptions = {
@@ -43,6 +44,8 @@ export type StudioOptions = {
   // Every studio save regenerates the bindings; the studio knows nothing of
   // how they are compiled, so `hull studio` plugs the compiler in here.
   onWrite?: (blueprint: Blueprint) => void;
+  // Plan, deploy and destroy, when the studio was started with an operator.
+  operations?: Operations;
 };
 
 // GET /estimate?environment=<name>: the blueprint merged for that environment
@@ -80,9 +83,17 @@ export type ErrorResponse = { error: string; diagnostics?: Diagnostic[] };
 
 // The studio HTTP API over one blueprint directory, as a Hono app so tests
 // call it in-process; startStudio serves it with the dashboard.
-export function createStudioServer({ directory, onWrite }: StudioOptions) {
+export function createStudioServer({ directory, onWrite, operations = createOperations() }: StudioOptions) {
   const app = new Hono();
   const file = join(directory, blueprintFileName);
+
+  // While an operation runs the file must not change: a deploy compiles the
+  // file as it was when it started, and an edit would make the dashboard
+  // lie about what is deploying.
+  const runningOperation = () => {
+    const current = operations.current();
+    return current?.status === "running" ? current : undefined;
+  };
 
   // Read on every request: the blueprint is the source of truth and the
   // developer's editor may have changed it since the last call.
@@ -128,6 +139,8 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
   // the result validated, then written only if valid and handed to onWrite.
   // The answer is what GET /blueprint would return afterwards.
   app.put("/blueprint", async (c) => {
+    const running = runningOperation();
+    if (running) return c.json({ error: `a ${running.kind} of ${running.environment} is running; the blueprint cannot change until it ends` }, 409);
     const current = readText();
     if (current === undefined) return missingBlueprint(c);
     const ops = opsSchema.safeParse(await c.req.json().catch(() => undefined));
@@ -267,6 +280,32 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
     const response: CatalogResponse = { provider: merged.provider, kinds };
     return c.json(response);
   });
+
+  // POST /operations with a kind and an environment: starts it in the
+  // background and answers 202 with the operation; its progress and its end
+  // travel over the WebSocket. 409 while one runs.
+  app.post("/operations", async (c) => {
+    if (!operations.available) return c.json({ error: "this studio cannot run operations; start it with `hull studio`" }, 503);
+    const body = (await c.req.json().catch(() => undefined)) as { kind?: unknown; environment?: unknown } | undefined;
+    if (!isOperationKind(body?.kind)) {
+      return c.json({ error: `"${String(body?.kind)}" is not an operation; operations are ${operationKinds.join(", ")}` }, 400);
+    }
+    const environment = typeof body.environment === "string" ? body.environment : "";
+    const loaded = read();
+    if (!loaded) return missingBlueprint(c);
+    if (!loaded.blueprint) return c.json({ error: `${blueprintFileName} is not valid`, diagnostics: loaded.diagnostics }, 422);
+    if (!(environment in loaded.blueprint.environments)) {
+      const names = Object.keys(loaded.blueprint.environments).join(", ");
+      return c.json({ error: `no environment "${environment}" in ${blueprintFileName}; environments are ${names}` }, 404);
+    }
+    const running = runningOperation();
+    if (running) return c.json({ error: `a ${running.kind} of ${running.environment} is running; wait for it to end` }, 409);
+    return c.json(operations.start(body.kind, environment), 202);
+  });
+
+  // The last operation started, running or ended, with its events; null
+  // when none ran since the studio started.
+  app.get("/operations/current", (c) => c.json(operations.current() ?? null));
 
   app.get("/recommendations", (c) => {
     const found = mergedFor(c);

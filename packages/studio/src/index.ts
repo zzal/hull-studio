@@ -17,3 +17,18 @@ export {
   type Template,
   type TemplateName,
 } from "./templates.js";
+export {
+  createOperations,
+  operationKinds,
+  type DeployOutcome,
+  type OnProgress,
+  type Operation,
+  type OperationKind,
+  type OperationMessage,
+  type Operations,
+  type OperationStatus,
+  type Operator,
+  type PlanEstimate,
+  type PlanOutcome,
+  type ProgressEvent,
+} from "./operations.js";
