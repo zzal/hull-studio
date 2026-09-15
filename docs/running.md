@@ -15,8 +15,8 @@ each package is; this page is only about running things.
   is not the default profile. A `.envrc` at the repo root is gitignored for
   this purpose (direnv).
 
-Nothing else needs AWS: `hull init`, `hull studio`, the tests and the
-typecheck never touch the network.
+Nothing else needs AWS: `hull init`, `hull studio` (until you plan or
+deploy from it), the tests and the typecheck never touch the network.
 
 ## Build and check
 
@@ -61,34 +61,43 @@ hull --help
 
 | Command | What it does | Needs |
 |---|---|---|
-| `hull init` | Writes a starting `hull.yaml` (an HTTP API linked read-write to a relational database) and the `.gitignore` entries | nothing |
-| `hull studio [--port N]` | Starts the dashboard on localhost and opens the browser; every save rewrites the file with comments intact and regenerates `.hull/bindings` | nothing |
-| `hull deploy --env <name>` | Compiles the blueprint for that environment and deploys it into your AWS account, with per-resource progress and the API URL at the end | Pulumi CLI, AWS credentials |
+| `hull init [--template api-database\|blank]` | Writes a starting `hull.yaml` from a template (the API linked to a database, or an empty blueprint named after the folder) and the `.gitignore` entries | nothing |
+| `hull studio [--port N]` | Starts the dashboard on localhost and opens the browser; in a folder without a blueprint it opens on a start screen. Every save rewrites the file with comments intact and regenerates `.hull/bindings`; plan, deploy and destroy run from the dashboard too | nothing to edit; Pulumi CLI and AWS credentials to plan or deploy |
+| `hull plan --env <name>` | Shows what deploying that environment would create, update or delete, and its monthly figure, without creating any resource | Pulumi CLI, AWS credentials |
+| `hull deploy --env <name> [--yes]` | Shows the plan and the figure, asks, then deploys into your AWS account with per-resource progress and the API URL at the end; `--yes` skips the question | Pulumi CLI, AWS credentials |
 | `hull destroy --env <name>` | Removes every resource of that environment; keeps the state bucket, `.hull/state.json` and `.hull/passphrase` | Pulumi CLI, AWS credentials |
 
 A failing command prints one message to stderr and exits 1. Pre-flight
 stops before any cloud call when the Pulumi CLI is missing, the blueprint
-is invalid, an entry file is missing, the passphrase is gone, or no AWS
-credentials resolve.
+is invalid, an entry file is missing, the passphrase is gone, no AWS
+credentials resolve, or a deploy has no terminal to ask and no `--yes`.
 
 ## The demo: examples/todos
 
-`examples/todos` is a Hono app that reads todos from Postgres through the
-generated binding. It carries its own `hull.yaml`, so the demo starts at
-`hull studio`:
+`examples/todos` is a Hono app whose `GET /todos` reads from Postgres
+through the generated binding and whose `POST /todos` enqueues a title for
+a Lambda worker, which writes the row. It carries its own `hull.yaml` (the
+milestone 2 demo blueprint), so the terminal path starts at `hull plan`;
+the dashboard path is in the README:
 
 ```bash
 cd examples/todos
-node ../../packages/cli/dist/bin.js studio            # look around, Ctrl+C
-node ../../packages/cli/dist/bin.js deploy --env dev  # 5 to 10 minutes, mostly RDS
-curl https://<api url printed above>/todos
-node ../../packages/cli/dist/bin.js destroy --env dev # a few minutes
+node ../../packages/cli/dist/bin.js studio             # look around, plan and deploy from there, or:
+node ../../packages/cli/dist/bin.js plan --env dev     # what would be created, and the figure
+node ../../packages/cli/dist/bin.js deploy --env dev   # shows the plan, asks; 5 to 10 minutes, mostly RDS
+curl -X POST https://<api url printed above>/todos -d '{"title":"Ship milestone 2"}'
+curl https://<api url printed above>/todos             # the worker's row is there
+node ../../packages/cli/dist/bin.js deploy --env prod  # prod's sizing, its own stack
+node ../../packages/cli/dist/bin.js destroy --env dev  # a few minutes each
+node ../../packages/cli/dist/bin.js destroy --env prod
 ```
 
-What it costs: RDS `db.t4g.micro` is about two cents an hour (about USD 12 a
-month if forgotten), Lambda and API Gateway are in the free tier at demo
-traffic, the state bucket is cents, and there is no NAT gateway. Never leave
-`dev` up overnight: `hull destroy --env dev` ends every run.
+What it costs with both environments up: the two RDS instances are about
+five cents an hour together (about USD 35 a month if forgotten); SQS,
+Lambda and API Gateway are within the always-free allowances at demo
+traffic; the state bucket is cents; there is no NAT gateway. Never leave
+either environment up overnight: `hull destroy --env dev` and
+`hull destroy --env prod` end every run.
 
 Files the first deploy creates under `examples/todos/.hull`:
 

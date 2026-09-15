@@ -14,9 +14,15 @@ run and demo.
 Milestone 1, proof of concept, is done: two intents (an HTTP API on Lambda
 plus API Gateway, and a relational database on RDS Postgres) end to end,
 happy path only, with the demo script run twice on a clean account.
-Milestone 2 (`docs/milestones/02-queue-worker-environments.md`) adds a
-queue, a background worker, editing intents and overrides in the studio,
-and a second environment. Everything else in the glossary is later.
+Milestone 2 (`docs/milestones/02-queue-worker-environments.md`) is built
+and its automated suite passes: a queue and a background worker, the
+studio as the editor (start screen, inspector, palette, links, overrides)
+and the operator (plan, deploy, destroy from the dashboard), `hull plan`,
+a confirmation before `hull deploy`, and a second environment. Its exit,
+the demo script run twice on a clean account along both paths, is a
+manual acceptance test still to be run; the VPC-reach spike (ADR 0008) is
+recorded as provisional until it is. Everything else in the glossary is
+later.
 
 ## Repository layout
 
@@ -29,8 +35,8 @@ tests, tsup for the JavaScript bundles with declarations emitted by `tsc`.
 | `packages/catalog` | Intents, candidate resolutions, sizing, cost models, pricing snapshot, recommendation rules | Pulumi, the file format, the UI |
 | `packages/compiler` | Resolved blueprint to Pulumi program, tier bundling, binding module and env-var contract | The UI, YAML |
 | `packages/studio` | Local HTTP and WebSocket server over the blueprint, React dashboard | Pulumi |
-| `packages/cli` | The `hull` binary: `init`, `studio`, `deploy`, `destroy` | Cost models, UI |
-| `examples/todos` | The proof-of-concept application the demo script deploys | |
+| `packages/cli` | The `hull` binary: `init`, `studio`, `plan`, `deploy`, `destroy` | Cost models, UI |
+| `examples/todos` | The application the demo script deploys: an API that enqueues, a worker that writes the row | |
 
 Dependency direction: `cli -> studio, compiler -> catalog -> blueprint` and
 `studio -> catalog -> blueprint`. Nothing points back. Direct edges to
@@ -48,22 +54,33 @@ a public URL, `hull init` writes schema comment lines pointing at the installed
 file, which JetBrains and the YAML language server both accept.
 
 `packages/catalog/pricing/aws.json` is the pricing snapshot: the us-east-1
-on-demand prices of exactly the sixteen SKUs the three v0 resolutions use
+on-demand prices of exactly the seventeen SKUs the six v1 resolutions use
 (including the Secrets Manager secret that holds the RDS managed master
-password), refreshed from the AWS Price List Bulk API by
-`pnpm -F @hull/catalog refresh-pricing`, with the free tier rules beside them
-as data. The rules are verified by hand and dated in the file; the write-up
-of the 2025 change to a credit-based free tier is in
+password and the SQS standard queue request), refreshed from the AWS Price
+List Bulk API by `pnpm -F @hull/catalog refresh-pricing`, with the free tier
+rules beside them as data. The rules are verified by hand and dated in the
+file; the write-up of the 2025 change to a credit-based free tier is in
 `packages/catalog/README.md`. What is left for every account is the
-always-free allowances, and of these SKUs only Lambda has one, so the
-estimate's free-tier figure is labelled "always-free allowances only". The
-allowances are one account-wide pool that the environment's intents draw
-from in blueprint order.
+always-free allowances, and of these SKUs only Lambda and SQS have one, so
+the estimate's free-tier figure is labelled "always-free allowances only".
+The allowances are one account-wide pool that the environment's intents
+draw from in blueprint order. Each resolution also declares, as data, the
+resources it implies in the provider's words; every cost model line item
+names one of them, and the compiler's program test checks the names
+against the Pulumi types the program declares.
 
-The studio API serves `GET /blueprint` (model and diagnostics) and
-`GET /estimate?environment=<name>` (the blueprint merged for that environment,
-each sizing value marked derived or overridden, and the monthly low, expected
-and high figures per intent and in total, with and without free tier).
+The studio API serves `GET /blueprint` (model and diagnostics),
+`GET /estimate?environment=<name>` (the blueprint merged for that
+environment, each sizing value marked derived or overridden, and the
+monthly low, expected and high figures per intent, per resource each
+intent implies, and in total, with and without free tier),
+`GET /recommendations`, `GET /catalog` (each kind's roles and candidates),
+`GET /templates` and `POST /blueprint` (the start screen), `PUT /blueprint`
+(a list of set, delete and rename operations applied to the file with
+comments intact, refused with diagnostics when the result would be
+invalid), and `POST /operations` (plan, deploy or destroy through the
+operator the CLI hands the studio, one at a time, with the progress on the
+`/changes` WebSocket).
 
 `.hull/bindings/index.ts` is the binding module: generated from the blueprint
 on every studio save and every deploy, one exported object per intent a tier
@@ -90,20 +107,43 @@ ships its `hull.yaml`; `pnpm typecheck` there regenerates the bindings first
 (`pnpm bindings`), and `tests/todos-example.test.ts` bundles the entry and
 typechecks the example against them.
 
-`hull deploy --env <name>` runs the milestone's deploy path. Pre-flight, before
-any cloud call: the Pulumi CLI is present, the blueprint is valid, every entry
-file exists, and the passphrase is consistent with the state file. Then the
-AWS identity is resolved from the ambient profile, the state bucket
+`hull plan --env <name>` is the deploy pipeline stopped before any mutation
+of the environment. Pre-flight, before any cloud call: the Pulumi CLI is
+present, the blueprint is valid, every tier's entry file exists, and the
+passphrase is consistent with the state file. Then the AWS identity is
+resolved from the ambient profile, the state bucket
 `hull-state-<account>-<region>` is created if missing (region location
 constraint, public access blocked, versioning on) and recorded in
-`.hull/state.json`, which is committed so a second machine deploys against the
-same state. The deploy secrets passphrase is generated on the first deploy into
-the gitignored `.hull/passphrase`; a missing passphrase on a repository whose
-state file already records a bucket is an error, never a silent regeneration.
-The passphrase in a repository folder is a PoC choice; KMS is the intended
-later secrets provider. The blueprint is then compiled, the bindings
-regenerated, the tier bundled, and the program run through the deploy engine
-with one line per resource event and a summary, ending with the API URL.
+`.hull/state.json`, which is committed so a second machine deploys against
+the same state, and the deploy secrets passphrase is generated on the first
+run into the gitignored `.hull/passphrase`; those two are the only things a
+plan may create, and every environment shares them. A missing passphrase on
+a repository whose state file already records a bucket is an error, never a
+silent regeneration; the passphrase in a repository folder is a PoC choice,
+KMS is the intended later secrets provider. The blueprint is then compiled,
+the bindings regenerated, each tier bundled, and the engine's preview
+rendered as one line per resource it would create, update or delete, the
+change counts, and the environment's expected monthly figure with and
+without free tier, from the estimate the studio serves.
+
+`hull deploy --env <name>` runs that plan, prints it with the figure, and
+asks to proceed; `--yes` answers for scripts, and a run without a terminal
+and without `--yes` is refused before any cloud call. Then the program runs
+through the deploy engine with one line per resource event and a summary,
+ending with the API URL. A queue becomes an SQS standard queue with a
+dead-letter queue (five receives, fourteen days); a worker becomes a Lambda
+fed by the queue it consumes through an event source mapping with the
+sizing's batch size and maximum concurrency and partial batch failures
+reported; each link is one IAM policy on the tier's role (send for
+`produce`; receive, delete and attribute reads for `consume`; the secret
+read for `read-write`) plus the contract variables. A tier is attached to
+the default VPC only when it links a database (ADR 0008); there is no NAT
+gateway.
+
+The same blueprint deploys to `dev` and `prod` as two stacks on the same
+state bucket and passphrase, each with its environment's usage profile and
+overrides, and `hull destroy --env prod` leaves `dev` untouched. Nothing in
+the CLI is special about `prod`.
 
 Pre-flight stops at the first failure with a message a first-time user can
 act on: the Pulumi CLI missing (with the install command), the blueprint
@@ -134,13 +174,24 @@ byte-identical, so Pulumi reports every resource unchanged. The test suite
 checks this by running the program handed to the fake engine under Pulumi's
 mock runtime on both runs and comparing what it declared.
 
-The deploy engine is a small interface (`check`, `up`, `destroy`,
-`removeStack`, a progress callback) in `packages/cli/src/deploy/engine.ts`,
-implemented over the Pulumi Automation API as the second spike settled it:
-the project backend URL points at the state bucket and overrides any Pulumi
-Cloud login, the region is set in both the process environment and the
-provider config, credentials come from the ambient AWS profile. Tests use a
-fake engine and a fake account and never reach the network.
+The deploy engine is a small interface (`check`, `preview`, `up`,
+`destroy`, `removeStack`, a progress callback) in
+`packages/cli/src/deploy/engine.ts`, implemented over the Pulumi Automation
+API as the second spike settled it: the project backend URL points at the
+state bucket and overrides any Pulumi Cloud login, the region is set in
+both the process environment and the provider config, credentials come
+from the ambient AWS profile. Tests use a fake engine and a fake account
+and never reach the network.
+
+The studio runs the same three operations from the dashboard: `hull studio`
+hands the studio server an operator built from the functions its own
+commands use, so the studio package never imports Pulumi
+(`tests/dependency-direction.test.ts` holds the line). One operation runs
+at a time; edits are refused with 409 while one runs and the file watcher's
+signal is deferred to its end. The studio's tests run it with a fake
+operator, as the CLI's run with a fake engine. The studio runs in the
+developer's shell with the ambient profile, on localhost only, so the
+operations have exactly the access the terminal has; nothing is stored.
 
 ## Developing
 
@@ -154,38 +205,58 @@ pnpm test
 pnpm typecheck
 ```
 
-Prototype branches (`prototype/yaml-round-trip`, `prototype/pulumi-automation`)
-are spikes with their verdicts in their READMEs. They are never merged.
+Prototype branches (`prototype/yaml-round-trip`, `prototype/pulumi-automation`,
+`prototype/vpc-reach`) are spikes with their verdicts in their READMEs. They
+are never merged.
 
-## Acceptance test: the milestone 1 demo
+## Acceptance test: the milestone 2 demo
 
-The milestone is done when this script runs twice in a row, in one terminal,
-on a fresh AWS account, with the Pulumi CLI installed and AWS credentials in
-the ambient profile:
+The milestone is done when this demo runs twice in a row on a fresh AWS
+account, with the Pulumi CLI installed and AWS credentials in the ambient
+profile, once along each path. Both paths build the same blueprint (the
+one `examples/todos` carries) and end with both environments destroyed.
+
+The dashboard path, from an empty folder holding the todos source:
 
 ```bash
-hull init                 # writes hull.yaml with the two intents and a link
-hull studio               # dashboard: 2 nodes, 1 link, estimate, recommendation
-hull deploy --env dev     # compiles to Pulumi, deploys, generates bindings
-curl https://<api>/todos  # the API reads from the database through its binding
-hull destroy --env dev    # everything gone, bill stays near zero
+hull studio               # start screen: choose api-database; then add a queue,
+                          # rename it jobs, add a worker, draw api -> jobs (produce),
+                          # worker -> jobs (consume), worker -> db (read-write),
+                          # set messages a month; Plan dev, then Deploy dev and confirm
+curl -X POST https://<api>/todos -d '{"title":"Ship milestone 2"}'   # the API enqueues, 202
+curl https://<api>/todos  # the worker has written the row to Postgres
+                          # switch to prod, Deploy prod; then Destroy dev and Destroy prod
 ```
 
-This path touches real AWS and is a manual test, not an automated one. The
-automated suite never needs credentials or the network. Run the script twice
-in the same directory: the second `hull deploy` finds the state bucket and
-the passphrase from the first run, creates everything again from scratch
-because `hull destroy` removed the stack, and `hull destroy` ends it again.
-Afterwards, `aws s3 ls` shows the state bucket and nothing else, and the RDS,
-Lambda and API Gateway consoles are empty. `examples/todos`
-already carries its `hull.yaml` (the sample `hull init` writes, with the schema
-comments pointing at the workspace's own schema file), so the script starts at
-`hull studio` there; `hull init` is for a fresh directory.
+The terminal path, in `examples/todos` (its `hull.yaml` is already the
+demo blueprint; `hull init --template api-database` writes the milestone 1
+sample in a fresh directory, `--template blank` an empty blueprint):
 
-Cost of a run: RDS `db.t4g.micro` is about two cents an hour (about $12 a
-month if left up), Lambda and API Gateway sit in the free tier at demo
-traffic, the S3 state bucket is cents, and there is no NAT gateway by design.
-A deploy takes five to ten minutes, most of it the RDS instance; a destroy
-takes a few minutes for the same reason. Never leave the dev environment up
-overnight: `hull destroy --env dev` ends every run, and the state bucket it
-keeps costs nothing worth mentioning.
+```bash
+hull plan --env dev       # what would be created, and the monthly figure
+hull deploy --env dev     # shows the plan, asks, then deploys; --yes for scripts
+curl -X POST https://<api>/todos -d '{"title":"Ship milestone 2"}'
+curl https://<api>/todos
+hull deploy --env prod    # same blueprint, prod's sizing, its own stack on the same bucket
+hull destroy --env dev
+hull destroy --env prod
+```
+
+These paths touch real AWS and are manual tests, not automated ones. The
+automated suite never needs credentials or the network. Run the demo twice
+in the same directory: the second run finds the state bucket and the
+passphrase from the first, creates everything again from scratch because
+the destroys removed the stacks, and ends the same way. Afterwards,
+`aws s3 ls` shows the state bucket and nothing else, and the RDS, Lambda,
+SQS and API Gateway consoles are empty.
+
+Cost of a run with both environments up for an hour: the two RDS instances
+(`db.t4g.micro` in dev, `db.t4g.small` in prod) are about five cents an hour
+together (about USD 35 a month if forgotten); SQS, Lambda and API Gateway
+sit within the always-free allowances at demo traffic; the S3 state bucket
+is cents; there is no NAT gateway by design, and no interface endpoints
+unless ADR 0008's spike says they are needed. A deploy takes five to ten
+minutes, most of it the RDS instance; a destroy takes a few minutes for
+the same reason. Never leave either environment up overnight:
+`hull destroy --env dev` and `hull destroy --env prod` end every run, and
+the state bucket they keep costs nothing worth mentioning.
