@@ -1,4 +1,4 @@
-import { isCollection, isScalar, isSeq, parseDocument, Scalar, stringify, type Document } from "yaml";
+import { isCollection, isMap, isScalar, isSeq, parseDocument, Scalar, stringify, type Document, type Pair } from "yaml";
 import { z } from "zod";
 
 // Edit operations: the studio's patch contract, settled by spike 1 of
@@ -11,6 +11,9 @@ const pathSchema = z.array(z.union([z.string(), z.number().int().nonnegative()])
 const opSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set"), path: pathSchema, value: z.unknown() }),
   z.object({ op: z.literal("delete"), path: pathSchema }),
+  // A mapping key renamed in place: the entry keeps its position, its
+  // comments and its value. How the studio renames an intent.
+  z.object({ op: z.literal("rename"), path: pathSchema, to: z.string().min(1) }),
 ]);
 export const opsSchema = z.array(opSchema);
 export type Op = z.infer<typeof opSchema>;
@@ -35,8 +38,10 @@ export function applyOps(text: string, ops: Op[]): string {
     checkPath(document, op.path);
     if (op.op === "set") {
       current = spliceScalar(current, document, op.path, op.value) ?? setThroughDocument(document, op.path, op.value);
-    } else {
+    } else if (op.op === "delete") {
       current = deleteThroughDocument(document, op.path);
+    } else {
+      current = renameThroughDocument(document, op.path, op.to);
     }
   }
   return current;
@@ -95,6 +100,11 @@ function spliceScalar(text: string, document: Document, path: Path, value: unkno
   return text.slice(0, start) + rendered + text.slice(valueEnd);
 }
 
+// An intent or an environment declared by name under its section; a new
+// one gets the blank line before it that the canonical form puts between
+// declarations, when it is not the first.
+const declaredByName = ["intents", "environments"];
+
 function setThroughDocument(document: Document, path: Path, value: unknown): string {
   // Collections along the path the set fills: absent ones it creates, and an
   // empty flow one such as `dev: {}`. Both must come out in block style, or
@@ -103,11 +113,38 @@ function setThroughDocument(document: Document, path: Path, value: unknown): str
     const node = document.getIn(prefix, true);
     return node === undefined || (isCollection(node) && node.items.length === 0);
   });
+  const newDeclaration = path.length === 2 && declaredByName.includes(String(path[0])) && document.getIn(path, true) === undefined;
   document.setIn(path, value);
   for (const prefix of filled) {
     const node = document.getIn(prefix, true);
     if (isCollection(node)) node.flow = false;
   }
+  if (newDeclaration) {
+    const section = document.getIn([path[0]!], true);
+    if (isMap(section) && section.items.length > 1) keyScalar(pairNamed(section.items, String(path[1]))!).spaceBefore = true;
+  }
+  return document.toString();
+}
+
+function pairNamed(items: Pair[], name: string): Pair | undefined {
+  return items.find((pair) => (isScalar(pair.key) ? pair.key.value : pair.key) === name);
+}
+
+// The key of a pair as a Scalar, wrapping a plain one the Document API made.
+function keyScalar(pair: Pair): Scalar {
+  if (!isScalar(pair.key)) pair.key = new Scalar(pair.key);
+  return pair.key as Scalar;
+}
+
+function renameThroughDocument(document: Document, path: Path, to: string): string {
+  const prefix = path.slice(0, -1);
+  const name = String(path.at(-1));
+  const parent = document.getIn(prefix, true);
+  if (!isMap(parent)) throw new PatchError(`cannot rename ${pathText(path)}: ${pathText(prefix)} is not a mapping`);
+  const pair = pairNamed(parent.items, name);
+  if (!pair) throw new PatchError(`cannot rename ${pathText(path)}: nothing there`);
+  if (pairNamed(parent.items, to)) throw new PatchError(`cannot rename ${pathText(path)} to ${to}: ${pathText([...prefix, to])} already exists`);
+  keyScalar(pair).value = to;
   return document.toString();
 }
 
@@ -115,7 +152,6 @@ function setThroughDocument(document: Document, path: Path, value: unknown): str
 // that is not empty (an `overrides: {}` is noise), except a declaration: a
 // section of the blueprint, or an intent or environment by name. `dev: {}` is
 // a declared environment and stays.
-const declaredByName = ["intents", "environments"];
 function isDeclaration(prefix: Path): boolean {
   return prefix.length <= 1 || (prefix.length === 2 && declaredByName.includes(String(prefix[0])));
 }

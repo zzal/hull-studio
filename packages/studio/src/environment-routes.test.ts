@@ -9,7 +9,7 @@ import { get, sampleBlueprint } from "./testing.js";
 // way when there is nothing to compute: no name, an unknown name, an invalid
 // blueprint, no blueprint at all.
 
-describe.each(["/estimate", "/recommendations"])("GET %s over an environment", (route) => {
+describe.each(["/estimate", "/recommendations", "/catalog"])("GET %s over an environment", (route) => {
   const failing = (text: string, query: string) => get<ErrorResponse>(text, `${route}${query}`);
 
   it("requires an environment name", async () => {

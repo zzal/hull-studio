@@ -32,9 +32,11 @@ export function loadBlueprint(text: string, vocabulary: Vocabulary): LoadResult 
       blueprint: null,
       diagnostics: parsed.error.issues.flatMap((issue) => {
         const path = issue.path.map((segment) => (typeof segment === "symbol" ? String(segment) : segment));
-        return issue.code === "unrecognized_keys"
-          ? issue.keys.map((key) => ({ path: [...path, key], message: issue.message }))
-          : [{ path, message: issue.message }];
+        if (issue.code === "unrecognized_keys") return issue.keys.map((key) => ({ path: [...path, key], message: issue.message }));
+        // A mapping key the key schema refused: the key schema's own words
+        // (what an intent name may be) beat "Invalid key in record".
+        if (issue.code === "invalid_key") return [{ path, message: issue.issues[0]?.message ?? issue.message }];
+        return [{ path, message: issue.message }];
       }),
     };
   }

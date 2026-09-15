@@ -11,22 +11,26 @@ import {
   sizingValues,
   type Blueprint,
   type Diagnostic,
+  type IntentKind,
   type LoadResult,
   type MergedBlueprint,
   type MergedSizing,
   type UsageProfile,
 } from "@hull/blueprint";
 import {
+  candidatesOfKind,
   CatalogError,
   deriveSizing,
   estimateEnvironment,
   pricing,
+  recommendForKind,
   recommendResolution,
   resolutionFacts,
   vocabulary,
   type Estimate,
   type IntentEstimate,
   type Recommendation,
+  type ResolutionFacts,
   type SizedIntent,
 } from "@hull/catalog";
 import { Hono, type Context } from "hono";
@@ -61,6 +65,15 @@ export type RecommendationsResponse = {
   environment: string;
   usage: UsageProfile;
   intents: Record<string, Recommendation>;
+};
+
+// GET /catalog?environment=<name>: what the palette and the inspector need
+// from the catalog for the blueprint's provider: each kind's link roles, its
+// candidate resolutions with what they imply, and the candidate a new intent
+// of that kind gets at the environment's usage profile.
+export type CatalogResponse = {
+  provider: string;
+  kinds: Record<IntentKind, { roles: readonly string[]; recommended: string; candidates: ResolutionFacts[] }>;
 };
 
 export type ErrorResponse = { error: string; diagnostics?: Diagnostic[] };
@@ -118,7 +131,7 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
     const current = readText();
     if (current === undefined) return missingBlueprint(c);
     const ops = opsSchema.safeParse(await c.req.json().catch(() => undefined));
-    if (!ops.success) return c.json({ error: "body must be a list of set and delete operations" }, 400);
+    if (!ops.success) return c.json({ error: "body must be a list of set, delete and rename operations" }, 400);
 
     let text: string;
     try {
@@ -132,10 +145,35 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
     if (!loaded.blueprint) {
       return c.json({ error: `the patch makes ${blueprintFileName} invalid`, diagnostics: loaded.diagnostics }, 422);
     }
+    // An override the vocabulary accepts can still be one the catalog
+    // refuses (memory 0, an unpriced instance class): refused here with the
+    // estimate's own words, at the override, rather than written and shown
+    // as a broken estimate.
+    const unpriceable = checkSizing(loaded.blueprint);
+    if (unpriceable) return c.json({ error: unpriceable.message, diagnostics: [unpriceable] }, 422);
     writeFileSync(file, text);
     onWrite?.(loaded.blueprint);
     return c.json(loaded);
   });
+
+  // The first environment whose estimate the catalog refuses, as a
+  // diagnostic at the intent's overrides in that environment.
+  function checkSizing(blueprint: Blueprint): Diagnostic | undefined {
+    for (const environmentName of Object.keys(blueprint.environments)) {
+      const merged = mergeEnvironment(blueprint, environmentName, deriveSizing)!;
+      const intents = sizedIntents(merged);
+      for (const [name, intent] of Object.entries(intents)) {
+        try {
+          estimateEnvironment({ [name]: intent }, merged.usage, pricing);
+        } catch (error) {
+          if (!(error instanceof CatalogError)) throw error;
+          const overridden = blueprint.environments[environmentName]?.overrides?.[name] !== undefined;
+          return { path: overridden ? ["environments", environmentName, "overrides", name] : ["environments", environmentName], message: error.message };
+        }
+      }
+    }
+    return undefined;
+  }
 
   // The blueprint merged for the environment named in the query, or the
   // response explaining why there is none: every route over one environment
@@ -197,7 +235,7 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
             name,
             {
               resolution: intent.resolution,
-              deployable: resolutionFacts(intent.resolution).deployable,
+              deployable: resolutionFacts(intent.resolution, pricing).deployable,
               sizing: intent.sizing,
               ...estimated.intents[name]!,
             },
@@ -209,6 +247,25 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
     } catch (error) {
       return catalogResponse(c, error);
     }
+  });
+
+  app.get("/catalog", (c) => {
+    const found = mergedFor(c);
+    if ("response" in found) return found.response;
+    const { merged } = found;
+
+    const kinds = Object.fromEntries(
+      Object.entries(vocabulary.kinds).map(([kind, { roles }]) => [
+        kind,
+        {
+          roles,
+          recommended: recommendForKind(kind as IntentKind, merged.provider, merged.usage, pricing),
+          candidates: candidatesOfKind(kind as IntentKind, merged.provider, pricing),
+        },
+      ]),
+    ) as CatalogResponse["kinds"];
+    const response: CatalogResponse = { provider: merged.provider, kinds };
+    return c.json(response);
   });
 
   app.get("/recommendations", (c) => {

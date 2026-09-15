@@ -1,4 +1,4 @@
-import type { IntentKind, Provider, UsageProfile, Vocabulary } from "@hull/blueprint";
+import type { IntentKind, Provider, SizingParameterType, UsageProfile, Vocabulary } from "@hull/blueprint";
 import type { z } from "zod";
 import { CatalogError, notAmong } from "./errors.js";
 import {
@@ -149,26 +149,49 @@ export function deriveSizing(resolution: string, usage: UsageProfile): Sizing {
 }
 
 // What the studio shows about a resolution before any estimate: whether this
-// version deploys it and the resources it implies.
-export type ResolutionFacts = { resolution: string; kind: IntentKind; deployable: boolean; resources: readonly string[] };
+// version deploys it, the resources it implies, and its sizing parameters
+// with, for an enum-like one, the values the snapshot prices.
+export type SizingParameterFacts = { type: SizingParameterType; choices?: string[] };
+export type ResolutionFacts = {
+  resolution: string;
+  kind: IntentKind;
+  deployable: boolean;
+  resources: readonly string[];
+  sizingParameters: Record<string, SizingParameterFacts>;
+};
 
-export function resolutionFacts(name: string): ResolutionFacts {
-  const { kind, deployable, resources } = resolutionNamed(name);
-  return { resolution: name, kind, deployable, resources };
+// The priced values of the parameters that name a SKU rather than a
+// quantity: only the RDS instance class in this version.
+function choicesOf(resolution: string, pricing: PricingSnapshot): Record<string, string[]> {
+  return resolution === "rds-postgres" ? { instanceClass: Object.keys(pricing.rds.postgres.instanceHour) } : {};
+}
+
+export function resolutionFacts(name: string, pricing: PricingSnapshot): ResolutionFacts {
+  const { kind, deployable, resources, sizing } = resolutionNamed(name);
+  const choices = choicesOf(name, pricing);
+  const sizingParameters = Object.fromEntries(
+    Object.entries(sizing.shape).map(([parameter, schema]) => [
+      parameter,
+      { type: schema.def.type as SizingParameterType, ...(choices[parameter] && { choices: choices[parameter] }) },
+    ]),
+  );
+  return { resolution: name, kind, deployable, resources, sizingParameters };
 }
 
 // Every candidate resolution of a kind on a provider, in catalog order.
-export function candidatesOfKind(kind: IntentKind, provider: Provider): ResolutionFacts[] {
+export function candidatesOfKind(kind: IntentKind, provider: Provider, pricing: PricingSnapshot): ResolutionFacts[] {
   return Object.entries(resolutions)
     .filter(([, definition]) => definition.kind === kind && definition.provider === provider)
-    .map(([name]) => resolutionFacts(name));
+    .map(([name]) => resolutionFacts(name, pricing));
 }
 
 // The kind of a resolution and every candidate of that kind on the same
 // provider, each at its derived sizing for the profile, in catalog order.
 export function candidatesOf(resolution: string, usage: UsageProfile): { kind: IntentKind; candidates: SizedIntent[] } {
   const { kind, provider } = resolutionNamed(resolution);
-  const candidates = candidatesOfKind(kind, provider).map(({ resolution: name }) => ({ resolution: name, sizing: deriveSizing(name, usage) }));
+  const candidates = Object.entries(resolutions)
+    .filter(([, definition]) => definition.kind === kind && definition.provider === provider)
+    .map(([name]) => ({ resolution: name, sizing: deriveSizing(name, usage) }));
   return { kind, candidates };
 }
 

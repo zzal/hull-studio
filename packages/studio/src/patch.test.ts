@@ -155,6 +155,108 @@ describe("PUT /blueprint on a canonical blueprint", () => {
   });
 });
 
+describe("PUT /blueprint renaming an intent", () => {
+  // The inspector's rename: the intent's key, every link's `to` that points
+  // at it, and its overrides in every environment, in one patch. The key
+  // keeps its place and its comments; the links are scalar splices.
+  const rename: Op[] = [
+    { op: "rename", path: ["intents", "db"], to: "analytics" },
+    { op: "set", path: ["intents", "api", "links", 0, "to"], value: "analytics" },
+    { op: "rename", path: ["environments", "prod", "overrides", "db"], to: "analytics" },
+  ];
+
+  it("rewrites the key, the link and the override in place, comments intact", async () => {
+    const { status, body, file } = await apply(handFormattedBlueprint, rename);
+
+    expect(status).toBe(200);
+    expect(Object.keys(body.blueprint?.intents ?? {})).toEqual(["api", "analytics"]);
+    expect(body.blueprint?.intents.api).toMatchObject({ links: [{ to: "analytics", role: "read-write" }] });
+    expect(body.blueprint?.environments.prod?.overrides).toEqual({ analytics: { instanceClass: "db.t4g.small" } });
+    expect(comments(file)).toEqual(comments(handFormattedBlueprint));
+    expect(lineDiff(handFormattedBlueprint, file).removed).toEqual([
+      "region: us-east-1   # closest region to the team",
+      "usage:                       # usage profile, low-end defaults from `hull init`",
+      "    resolution: lambda-api-gateway  # studio may change this",
+      "      - to: db",
+      "        role: read-write   # only valid role in v0",
+      "  db:",
+      "      db:",
+    ]);
+  });
+
+  it("is refused untouched when the new name collides with an intent", async () => {
+    const { status, body, file } = await patch<ErrorResponse>(sampleBlueprint, [{ op: "rename", path: ["intents", "db"], to: "api" }]);
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: "cannot rename intents.db to api: intents.api already exists" });
+    expect(file).toBe(sampleBlueprint);
+  });
+
+  it("is refused untouched when the new name is not a valid intent name", async () => {
+    const { status, body, file } = await patch<ErrorResponse>(sampleBlueprint, [
+      { op: "rename", path: ["intents", "db"], to: "Main-DB" },
+      { op: "set", path: ["intents", "api", "links", 0, "to"], value: "Main-DB" },
+    ]);
+
+    expect(status).toBe(422);
+    expect(body.diagnostics).toEqual([
+      { path: ["intents", "api", "links", 0, "to"], message: "intent names must be lower-case letters, digits or underscores, starting with a letter" },
+      { path: ["intents", "Main-DB"], message: "intent names must be lower-case letters, digits or underscores, starting with a letter" },
+    ]);
+    expect(file).toBe(sampleBlueprint);
+  });
+
+  it("is refused for a key that does not exist", async () => {
+    const { status, body } = await patch<ErrorResponse>(sampleBlueprint, [{ op: "rename", path: ["intents", "cache"], to: "db2" }]);
+
+    expect(status).toBe(400);
+    expect(body).toEqual({ error: "cannot rename intents.cache: nothing there" });
+  });
+});
+
+describe("PUT /blueprint with the inspector's edits", () => {
+  it("removes the only link and leaves no empty links sequence", async () => {
+    const { status, body, file } = await apply(sampleBlueprint, [{ op: "delete", path: ["intents", "api", "links", 0] }]);
+
+    expect(status).toBe(200);
+    expect(body.blueprint?.intents.api).toEqual({ kind: "http-api", resolution: "lambda-api-gateway", entry: "src/api/index.ts" });
+    expect(lineDiff(sampleBlueprint, file)).toEqual({ removed: ["    links:", "      - to: db", "        role: read-write"], added: [] });
+  });
+
+  it("changes the name and the region as byte-exact scalar splices", async () => {
+    const { status, file } = await apply(handFormattedBlueprint, [
+      { op: "set", path: ["name"], value: "notes" },
+      { op: "set", path: ["region"], value: "eu-west-1" },
+    ]);
+
+    expect(status).toBe(200);
+    expect(lineDiff(handFormattedBlueprint, file)).toEqual({
+      removed: ["name: todos", "region: us-east-1   # closest region to the team"],
+      added: ["name: notes", "region: eu-west-1   # closest region to the team"],
+    });
+  });
+
+  // The palette's add: a new intent lands at the end of the section with the
+  // blank line the canonical form puts between intents.
+  it("adds an intent on its own lines after a blank line", async () => {
+    const { status, file } = await apply(sampleBlueprint, [
+      { op: "set", path: ["intents", "jobs"], value: { kind: "queue", resolution: "sqs-standard" } },
+    ]);
+
+    expect(status).toBe(200);
+    expect(file).toContain("    resolution: rds-postgres\n\n  jobs:\n    kind: queue\n    resolution: sqs-standard\n\nenvironments:");
+  });
+
+  it("adds the first intent of a blank blueprint in block style without a blank line", async () => {
+    const blank = sampleBlueprint.replace(/intents:[\s\S]*?\nenvironments:/, "intents: {}\n\nenvironments:");
+
+    const { status, file } = await apply(blank, [{ op: "set", path: ["intents", "db"], value: { kind: "relational-database", resolution: "rds-postgres" } }]);
+
+    expect(status).toBe(200);
+    expect(file).toContain("intents:\n  db:\n    kind: relational-database\n    resolution: rds-postgres\n\nenvironments:");
+  });
+});
+
 describe("PUT /blueprint deleting the last override", () => {
   it("removes the emptied parent mappings and keeps the environment's other keys", async () => {
     const { status, body, file } = await apply(sampleBlueprint, [
@@ -306,7 +408,7 @@ describe("PUT /blueprint rejections", () => {
     const response = await app.request("/blueprint", { method: "PUT", body: '{"op": "set"}' });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: "body must be a list of set and delete operations" });
+    expect(await response.json()).toEqual({ error: "body must be a list of set, delete and rename operations" });
     expect(readFileSync(join(directory, "hull.yaml"), "utf8")).toBe(sampleBlueprint);
   });
 

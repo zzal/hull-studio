@@ -1,5 +1,6 @@
-import type { IntentKind, UsageProfile } from "@hull/blueprint";
-import { candidatesOf, estimateEnvironment, type SizedIntent } from "./catalog.js";
+import type { IntentKind, Provider, UsageProfile } from "@hull/blueprint";
+import { candidatesOf, candidatesOfKind, deriveSizing, estimateEnvironment, type SizedIntent } from "./catalog.js";
+import { CatalogError } from "./errors.js";
 import type { PricingSnapshot } from "./pricing.js";
 import { messagesPerMonth } from "./sizing.js";
 
@@ -163,4 +164,14 @@ export function recommendResolution(
 
 function money(amount: number): string {
   return `$${amount.toFixed(2)}`;
+}
+
+// The resolution a new intent of the kind gets: the recommended candidate at
+// the profile, or the only one. Nothing to link yet, so a worker is priced
+// consuming nothing.
+export function recommendForKind(kind: IntentKind, provider: Provider, usage: UsageProfile, pricing: PricingSnapshot): string {
+  const [first] = candidatesOfKind(kind, provider, pricing);
+  if (!first) throw new CatalogError(`no candidate resolution of kind ${kind} on provider ${provider}`);
+  const sized: SizedIntent = { resolution: first.resolution, sizing: deriveSizing(first.resolution, usage) };
+  return recommendResolution(sized, usage, pricing)?.recommended ?? first.resolution;
 }

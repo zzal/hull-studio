@@ -11,10 +11,11 @@ export {
   type ResolutionFacts,
   type ResourceEstimate,
   type SizedIntent,
+  type SizingParameterFacts,
 } from "./catalog.js";
 export { CatalogError } from "./errors.js";
 export { pricing, type PricingSnapshot } from "./pricing.js";
-export { recommendResolution, type Dimension, type RankedResolution, type Recommendation } from "./recommendation.js";
+export { recommendForKind, recommendResolution, type Dimension, type RankedResolution, type Recommendation } from "./recommendation.js";
 export { resources } from "./meters.js";
 export {
   lambdaSizingSchema,
