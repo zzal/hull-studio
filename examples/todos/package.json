@@ -2,7 +2,7 @@
   "name": "todos",
   "version": "0.0.0",
   "private": true,
-  "description": "The proof-of-concept application deployed by the demo script: an HTTP API on Lambda reading todos from RDS Postgres",
+  "description": "The application deployed by the demo script: an HTTP API on Lambda that reads todos from RDS Postgres and enqueues new ones for a Lambda worker fed by SQS",
   "type": "module",
   "scripts": {
     "bindings": "tsx --conditions=@hull/source scripts/bindings.ts",
@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1131.0",
+    "@aws-sdk/client-sqs": "^3.1131.0",
     "hono": "^4.13.7",
     "postgres": "^3.4.9"
   },

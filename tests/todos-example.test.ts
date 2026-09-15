@@ -2,36 +2,42 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { blueprintFileName, loadBlueprint } from "@hull/blueprint";
+import { blueprintFileName, isTier, loadBlueprint } from "@hull/blueprint";
 import { vocabulary } from "@hull/catalog";
 import { bundleEntry, writeBindings } from "@hull/compiler";
 import { beforeAll, describe, expect, it } from "vitest";
 
-// The todos example against its generated binding: the bindings are written
-// from its blueprint, then the entry is bundled as a deploy would and the
-// example is typechecked. What `hull deploy` will do, minus AWS.
+// The todos example against its generated bindings: the bindings are written
+// from its blueprint, then each tier's entry is bundled as a deploy would and
+// the example is typechecked. What `hull deploy` will do, minus AWS.
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const example = join(root, "examples", "todos");
 
 describe("the todos example", () => {
-  let entry: string;
+  let entries: Record<string, string>;
 
   beforeAll(() => {
     const loaded = loadBlueprint(readFileSync(join(example, blueprintFileName), "utf8"), vocabulary);
     expect(loaded.diagnostics).toEqual([]);
-    const api = loaded.blueprint!.intents.api;
-    if (api?.kind !== "http-api") throw new Error("the example's api intent is not an http-api");
-    entry = api.entry;
-    writeBindings(example, loaded.blueprint!);
+    entries = Object.fromEntries(
+      Object.entries(loaded.blueprint!.intents).flatMap(([name, intent]) => (isTier(intent) ? [[name, intent.entry]] : [])),
+    );
+    expect(Object.keys(entries)).toEqual(["api", "worker"]);
+    const [index] = writeBindings(example, loaded.blueprint!);
+    const bindings = readFileSync(index!, "utf8");
+    expect(bindings).toContain("export const db: DatabaseBinding");
+    expect(bindings).toContain('export const jobs: Pick<QueueBinding, "send" | "consume">');
   });
 
-  it("bundles its entry to one module exporting the Lambda handler", async () => {
-    const { code } = await bundleEntry({ directory: example, entry });
+  it("bundles each tier's entry to one module exporting the Lambda handler", async () => {
+    for (const [name, entry] of Object.entries(entries)) {
+      const { code } = await bundleEntry({ directory: example, entry });
 
-    expect(code).toContain("export {");
-    expect(code).toMatch(/\bhandler\b/);
-  }, 30000);
+      expect(code, name).toContain("export {");
+      expect(code, name).toMatch(/\bhandler\b/);
+    }
+  }, 60000);
 
   it("typechecks against the generated binding", () => {
     const tsc = join(root, "node_modules", ".bin", "tsc");

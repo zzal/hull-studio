@@ -1,4 +1,4 @@
-import { readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Blueprint } from "@hull/blueprint";
@@ -22,6 +22,35 @@ const sample: Blueprint = {
   environments: { dev: {} },
 };
 
+// The milestone 2 plan's demo blueprint: the API produces to the queue the
+// worker consumes, and both read the database.
+const demo: Blueprint = {
+  ...sample,
+  usage: { requestsPerMonth: 100000, storageGb: 1, messagesPerMonth: 100000 },
+  intents: {
+    api: {
+      kind: "http-api",
+      resolution: "lambda-api-gateway",
+      entry: "src/api/index.ts",
+      links: [
+        { to: "db", role: "read-write" },
+        { to: "jobs", role: "produce" },
+      ],
+    },
+    jobs: { kind: "queue", resolution: "sqs-standard" },
+    worker: {
+      kind: "background-worker",
+      resolution: "lambda-worker",
+      entry: "src/worker/index.ts",
+      links: [
+        { to: "jobs", role: "consume" },
+        { to: "db", role: "read-write" },
+      ],
+    },
+    db: { kind: "relational-database", resolution: "rds-postgres" },
+  },
+};
+
 const exportsOf = (source: string) => [...source.matchAll(/^export const (\w+)/gm)].map((match) => match[1]);
 
 describe("generateBindings", () => {
@@ -34,6 +63,25 @@ describe("generateBindings", () => {
     expect(source).toContain("connectionString()");
     expect(source).toContain('"HULL_DB_HOST"');
     expect(source).toContain('"HULL_DB_PASSWORD_ARN"');
+  });
+
+  it("exports jobs with send and consume, and db, for the demo blueprint", () => {
+    const source = generateBindings(demo)["index.ts"]!;
+
+    expect(exportsOf(source)).toEqual(["db", "jobs"]);
+    expect(source).toContain('export const jobs: Pick<QueueBinding, "send" | "consume">');
+    expect(source).toContain('"HULL_JOBS_URL"');
+    expect(source).toContain("@aws-sdk/client-sqs");
+  });
+
+  it("exports only the methods of the roles linked to a queue", () => {
+    const produceOnly: Blueprint = { ...demo, intents: { ...demo.intents, worker: { ...demo.intents.worker!, links: [{ to: "db", role: "read-write" }] } as Blueprint["intents"][string] } };
+
+    expect(generateBindings(produceOnly)["index.ts"]).toContain('export const jobs: Pick<QueueBinding, "send">');
+  });
+
+  it("imports the SQS client only when a queue is linked", () => {
+    expect(generateBindings(sample)["index.ts"]).not.toContain("@aws-sdk/client-sqs");
   });
 
   it("starts every file with the generated, do not edit header", () => {
@@ -92,6 +140,22 @@ vi.mock("@aws-sdk/client-secrets-manager", () => ({
   },
   GetSecretValueCommand: class {
     constructor(public readonly input: { SecretId: string }) {}
+  },
+}));
+
+// The stubbed SQS client: every `send` is counted with its command, and the
+// number of clients made is counted too.
+const sqsSend = vi.fn();
+let sqsClients = 0;
+vi.mock("@aws-sdk/client-sqs", () => ({
+  SQSClient: class {
+    send = sqsSend;
+    constructor() {
+      sqsClients++;
+    }
+  },
+  SendMessageCommand: class {
+    constructor(public readonly input: { QueueUrl: string; MessageBody: string }) {}
   },
 }));
 
@@ -154,5 +218,84 @@ describe("the binding module written for the sample blueprint", () => {
     await expect(db.connectionString()).rejects.toThrow("throttled");
     await expect(db.connectionString()).resolves.toMatch(/^postgresql:\/\//);
     expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+type SqsEvent = { Records: { messageId: string; body: string }[] };
+type QueueBinding = {
+  send(message: unknown): Promise<void>;
+  consume<Message>(handler: (message: Message) => Promise<void>): (event: SqsEvent) => Promise<{ batchItemFailures: { itemIdentifier: string }[] }>;
+};
+
+describe("the queue binding written for the demo blueprint", () => {
+  const queueUrl = "https://sqs.us-east-1.amazonaws.com/123456789012/jobs";
+  // Its own folder under the package, so the module resolves the SDK the
+  // same way and never collides with the sample's module at the same path.
+  let directory: string;
+
+  beforeEach(() => {
+    directory = mkdtempSync(join(packageDirectory, "demo-bindings-"));
+    vi.resetModules();
+    sqsSend.mockReset();
+    sqsSend.mockResolvedValue({});
+    sqsClients = 0;
+    vi.stubEnv("HULL_JOBS_URL", queueUrl);
+    vi.stubEnv("HULL_JOBS_ARN", "arn:aws:sqs:us-east-1:123456789012:jobs");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  async function importWritten() {
+    const [written] = writeBindings(directory, demo);
+    return import(/* @vite-ignore */ written!) as Promise<{ jobs: QueueBinding }>;
+  }
+
+  it("send JSON-encodes the message to the queue named by the contract, with one client per process", async () => {
+    const { jobs } = await importWritten();
+
+    await jobs.send({ title: "Ship milestone 2" });
+    await jobs.send({ title: "Again" });
+
+    expect(sqsSend).toHaveBeenCalledTimes(2);
+    expect(sqsSend.mock.calls[0]?.[0]).toMatchObject({ input: { QueueUrl: queueUrl, MessageBody: '{"title":"Ship milestone 2"}' } });
+    expect(sqsClients).toBe(1);
+  });
+
+  it("send names the missing contract variable", async () => {
+    vi.stubEnv("HULL_JOBS_URL", "");
+    const { jobs } = await importWritten();
+
+    await expect(jobs.send({})).rejects.toThrow("HULL_JOBS_URL is not set; the jobs binding only works inside a tier deployed by Hull with a link to jobs");
+    expect(sqsSend).not.toHaveBeenCalled();
+  });
+
+  it("consume calls the handler once per decoded message and reports exactly the ids that threw", async () => {
+    const { jobs } = await importWritten();
+    const seen: unknown[] = [];
+    const handler = jobs.consume<{ title: string }>(async (message) => {
+      seen.push(message);
+      if (message.title === "bad") throw new Error("cannot insert");
+    });
+
+    const result = await handler({
+      Records: [
+        { messageId: "m1", body: '{"title":"one"}' },
+        { messageId: "m2", body: '{"title":"bad"}' },
+        { messageId: "m3", body: "not json" },
+        { messageId: "m4", body: '{"title":"four"}' },
+      ],
+    });
+
+    expect(seen).toEqual([{ title: "one" }, { title: "bad" }, { title: "four" }]);
+    expect(result).toEqual({ batchItemFailures: [{ itemIdentifier: "m2" }, { itemIdentifier: "m3" }] });
+  });
+
+  it("consume answers with no failures for a batch that all went through", async () => {
+    const { jobs } = await importWritten();
+    const handler = jobs.consume(async () => undefined);
+
+    await expect(handler({ Records: [{ messageId: "m1", body: "{}" }] })).resolves.toEqual({ batchItemFailures: [] });
   });
 });

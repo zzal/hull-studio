@@ -9,6 +9,7 @@ usage:
   # usage profile, low-end defaults from `hull init`
   requestsPerMonth: 100000
   storageGb: 1
+  messagesPerMonth: 100000
 
 intents:
   api:
@@ -16,6 +17,22 @@ intents:
     resolution: lambda-api-gateway
     entry: src/api/index.ts
     links:
+      - to: db
+        role: read-write
+      - to: jobs
+        role: produce
+
+  jobs:
+    kind: queue
+    resolution: sqs-standard
+
+  worker:
+    kind: background-worker
+    resolution: lambda-worker
+    entry: src/worker/index.ts
+    links:
+      - to: jobs
+        role: consume
       - to: db
         role: read-write
 
@@ -28,6 +45,9 @@ environments:
   prod:
     usage:
       requestsPerMonth: 2000000
+      messagesPerMonth: 2000000
     overrides:
       db:
         instanceClass: db.t4g.small
+      worker:
+        maxConcurrency: 10

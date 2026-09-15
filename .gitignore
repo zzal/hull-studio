@@ -23,3 +23,6 @@ coverage/
 
 # Per-developer environment (direnv); holds AWS credentials, never committed
 .envrc
+
+# Scratch folders the compiler tests write their demo bindings into
+packages/compiler/demo-bindings-*/

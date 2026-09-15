@@ -66,15 +66,23 @@ each sizing value marked derived or overridden, and the monthly low, expected
 and high figures per intent and in total, with and without free tier).
 
 `.hull/bindings/index.ts` is the binding module: generated from the blueprint
-on every studio save (and, later, every deploy), one exported object per intent
-a tier is linked to, typed by role. For the read-write database link, `db`
-exposes `connectionString()`, which reads the link's `HULL_DB_*` variables,
-fetches the managed master password once through the AWS SDK, keeps it for the
-process lifetime and returns a Postgres URL with SSL required. The folder is
-gitignored, every file carries a "generated, do not edit" header, and the
-language-agnostic contract behind it is the environment variables the compiler
-sets on the tier (`HULL_<INTENT>_HOST`, `_PORT`, `_NAME`, `_USER`,
-`_PASSWORD_ARN`).
+on every studio save and every deploy, one exported object per intent a tier
+is linked to, typed by role. For the read-write database link, `db` exposes
+`connectionString()`, which reads the link's `HULL_DB_*` variables, fetches
+the managed master password once through the AWS SDK, keeps it for the
+process lifetime and returns a Postgres URL with SSL required. For a queue
+link, `jobs` exposes `send(message)` on a `produce` link, which JSON-encodes
+the message and sends it with one SQS client per process, and
+`consume(handler)` on a `consume` link, which returns a Lambda handler that
+decodes each message of an SQS batch, calls the handler once per message,
+and reports the ones that threw as batch item failures so only those are
+redelivered. The folder is gitignored, every file carries a "generated, do
+not edit" header, and the language-agnostic contract behind it is the
+environment variables the compiler sets on the tier: for a database link
+`HULL_<INTENT>_HOST`, `_PORT`, `_NAME`, `_USER` and `_PASSWORD_ARN`; for a
+queue link, whatever its role, `HULL_<INTENT>_URL` and `HULL_<INTENT>_ARN`.
+A worker in another language reads the same variables and polls the queue
+itself.
 
 `examples/todos` is the application the demo deploys: a Hono app exporting a
 Lambda `handler` whose `GET /todos` reaches Postgres through the binding. It
