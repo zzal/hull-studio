@@ -274,3 +274,246 @@ body {
   width: auto;
   min-width: 180px;
 }
+
+/* Milestone 2: start screen, header, palette, inspector, operations. */
+
+.start {
+  max-width: 640px;
+  margin: 80px auto;
+  padding: 0 20px;
+}
+
+.start h1 {
+  font-size: 24px;
+}
+
+.templates {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.templates li {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.templates button,
+.choice button,
+.kinds button,
+.remove button {
+  font: inherit;
+  font-size: 13px;
+  color: white;
+  background: #1d4ed8;
+  border: 0;
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.quiet {
+  color: #1d4ed8;
+  background: transparent;
+  padding: 2px 6px;
+}
+
+button.danger {
+  background: #b91c1c;
+}
+
+.blueprint-header {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.blueprint-header .field {
+  width: 160px;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.blueprint-header .field span {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.running {
+  margin: 0;
+  padding: 8px 20px;
+  background: #fff7e6;
+  color: #7c4a03;
+  border-bottom: 1px solid #f5d9a8;
+}
+
+.kinds {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.kinds button {
+  background: #eef2ff;
+  color: #1d4ed8;
+}
+
+.inspector h3,
+.deploys h3,
+.sizing h3,
+.links h3 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+  color: #4b5563;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.inspector .field {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.inspector select {
+  font: inherit;
+  padding: 4px 6px;
+  border: 1px solid #c9ceda;
+  border-radius: 4px;
+  background: white;
+}
+
+.facts div {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.facts dt {
+  color: #6b7280;
+}
+
+.facts dd {
+  margin: 0;
+}
+
+.links ul {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.sizing-field {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sizing-field .field {
+  flex: 1;
+}
+
+.sizing-field em {
+  font-style: normal;
+  font-size: 11px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #4b5563;
+}
+
+.sizing-field em.overridden {
+  background: #fde68a;
+  color: #78350f;
+}
+
+.deploys table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.deploys th,
+.deploys td {
+  text-align: right;
+  padding: 4px;
+  border-top: 1px solid #eef0f4;
+}
+
+.deploys th:first-child,
+.deploys td:first-child {
+  text-align: left;
+}
+
+.deploys tfoot td {
+  font-weight: 600;
+  border-top: 2px solid #dfe3ea;
+}
+
+.deploys .no-charge {
+  color: #6b7280;
+  text-align: center;
+}
+
+.remove {
+  margin-top: 16px;
+}
+
+.confirm {
+  margin-top: 10px;
+  padding: 10px;
+  background: #f0f7ff;
+  border-radius: 6px;
+}
+
+.confirm p {
+  margin: 0 0 8px;
+}
+
+.operation {
+  margin-top: 12px;
+}
+
+.operation .events {
+  margin: 6px 0;
+  padding-left: 0;
+  list-style: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.operation .events li.failed,
+.operation .events li.diagnostic {
+  color: #8a1f11;
+}
+
+.operation .events li.note {
+  color: #1f2430;
+  font-family: system-ui, sans-serif;
+}
+
+.operation pre.failure {
+  white-space: pre-wrap;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.operation .outcome a {
+  color: #1d4ed8;
+}

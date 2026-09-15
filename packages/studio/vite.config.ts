@@ -15,8 +15,11 @@ export default defineConfig({
   server: {
     proxy: {
       "/blueprint": studio,
+      "/templates": studio,
+      "/catalog": studio,
       "/estimate": studio,
       "/recommendations": studio,
+      "/operations": studio,
       "/changes": { target: studio, ws: true },
     },
   },
