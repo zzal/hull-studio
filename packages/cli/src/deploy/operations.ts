@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { blueprintFileName, isTier } from "@hull/blueprint";
 import { writeBindings } from "@hull/compiler/bindings";
@@ -25,11 +26,14 @@ type Prepared = { environment: Environment; target: StackTarget; entries: { name
 
 // Pre-flight, local checks first so nothing reaches the cloud until the
 // blueprint could deploy: the engine, the blueprint, its entry files (when
-// asked), the passphrase. Then the account and the state bucket.
+// asked), the passphrase. Then the account and the state bucket. A plan
+// changes nothing: on a directory never deployed from it neither creates
+// the bucket nor the passphrase, and previews against an empty local state,
+// which is what a first deploy would find.
 async function prepare(
   { cwd, engine, provider, onProgress }: OperationContext,
   name: string,
-  { intro, entryFiles }: { intro: (application: string) => string; entryFiles: boolean },
+  { intro, entryFiles, readOnly }: { intro: (application: string) => string; entryFiles: boolean; readOnly: boolean },
 ): Promise<Prepared> {
   await engine.check();
   const environment = loadEnvironment(cwd, name);
@@ -47,6 +51,12 @@ async function prepare(
 
   const { account, profile } = await provider.identity(blueprint.region);
   note(onProgress, `${intro(blueprint.name)} in ${blueprint.region} (account ${account}, profile ${profile}).`);
+
+  if (readOnly && recorded === undefined) {
+    note(onProgress, "Nothing was deployed from here yet; planning against an empty state.");
+    const localBackend = `file://${mkdtempSync(join(tmpdir(), "hull-plan-"))}`;
+    return { environment, target: { ...stackTarget(environment, "", "plan"), backendUrl: localBackend }, entries };
+  }
 
   const stateBucket = recorded?.stateBucket ?? stateBucketName(account, blueprint.region);
   const bucket = await provider.ensureStateBucket(stateBucket, blueprint.region);
@@ -95,11 +105,9 @@ async function preview(context: OperationContext, prepared: Prepared, program: A
   return { changes, estimate };
 }
 
-// `hull plan --env <name>`: the deploy pipeline stopped before any mutation
-// of the environment. The state bucket and the passphrase, which every
-// environment shares, are created when missing; no resource is.
+// `hull plan --env <name>`: the deploy pipeline stopped before any mutation.
 export async function runPlan(context: OperationContext, name: string): Promise<PlanOutcome> {
-  const prepared = await prepare(context, name, { intro: (application) => `Planning ${application} ${name}`, entryFiles: true });
+  const prepared = await prepare(context, name, { intro: (application) => `Planning ${application} ${name}`, entryFiles: true, readOnly: true });
   const program = await compile(context, prepared);
   const outcome = await preview(context, prepared, program);
   note(context.onProgress, `Nothing was created; run \`hull deploy --env ${name}\` to proceed.`);
@@ -110,7 +118,7 @@ export async function runPlan(context: OperationContext, name: string): Promise<
 // deploy. A failure mid-way leaves what was created in the environment's
 // state; the report names the resources and what the provider said.
 export async function runDeploy(context: OperationContext, name: string, confirm: (question: string) => Promise<boolean>): Promise<DeployOutcome> {
-  const prepared = await prepare(context, name, { intro: (application) => `Deploying ${application} to ${name}`, entryFiles: true });
+  const prepared = await prepare(context, name, { intro: (application) => `Deploying ${application} to ${name}`, entryFiles: true, readOnly: false });
   const program = await compile(context, prepared);
   await preview(context, prepared, program);
   const { environment, target } = prepared;

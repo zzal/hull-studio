@@ -55,14 +55,16 @@ const deadLetterRetentionDays = 14;
 const secondsPerDay = 24 * 3600;
 
 type Link = { to: string; role: string };
-type Tier = { name: string; kind: "api" | "worker"; sizing: LambdaSizing | LambdaWorkerSizing; bundle: Bundle; links: Link[] };
+type DeployableTier =
+  | { name: string; kind: "api"; sizing: LambdaSizing; bundle: Bundle; links: Link[] }
+  | { name: string; kind: "worker"; sizing: LambdaWorkerSizing; bundle: Bundle; links: Link[] };
 
 // Refuses up front, before any resource is declared, what the program could
 // not deploy; the program itself only runs inside a Pulumi stack.
 export function compileProgram({ blueprint, bundles }: CompileInput): Program {
   const databases: { name: string; sizing: RdsSizing }[] = [];
   const queues: { name: string; sizing: SqsSizing }[] = [];
-  const tiers: Tier[] = [];
+  const tiers: DeployableTier[] = [];
   for (const [name, intent] of Object.entries(blueprint.intents)) {
     const target = deployable[intent.resolution];
     if (!target) throw new CompileError(`intent "${name}" resolves to ${intent.resolution}, which is not deployable in this version`);
@@ -74,8 +76,11 @@ export function compileProgram({ blueprint, bundles }: CompileInput): Program {
       const bundle = bundles[name];
       if (bundle === undefined) throw new CompileError(`no bundle for intent "${name}"`);
       const links = isTier(intent) ? (intent.links ?? []) : [];
-      const sizing = target === "api" ? sizingOf(lambdaSizingSchema, name, intent) : sizingOf(lambdaWorkerSizingSchema, name, intent);
-      tiers.push({ name, kind: target, sizing, bundle, links });
+      tiers.push(
+        target === "api"
+          ? { name, kind: "api", sizing: sizingOf(lambdaSizingSchema, name, intent), bundle, links }
+          : { name, kind: "worker", sizing: sizingOf(lambdaWorkerSizingSchema, name, intent), bundle, links },
+      );
     }
   }
   const apis = tiers.filter((tier) => tier.kind === "api");
@@ -83,9 +88,13 @@ export function compileProgram({ blueprint, bundles }: CompileInput): Program {
     throw new CompileError(`this version deploys one http-api intent; the blueprint has ${apis.map(({ name }) => name).join(", ")}`);
   }
   for (const { name, links } of tiers) {
-    for (const { to } of links) {
-      if (!databases.some((database) => database.name === to) && !queues.some((queue) => queue.name === to)) {
+    for (const { to, role } of links) {
+      const isQueue = queues.some((queue) => queue.name === to);
+      if (!databases.some((database) => database.name === to) && !isQueue) {
         throw new CompileError(`intent "${name}" links to "${to}", which is not a database or a queue this version deploys`);
+      }
+      if (isQueue && !(role in queueActions)) {
+        throw new CompileError(`intent "${name}" links to "${to}" with role ${role}, which this version does not deploy; queue roles are ${Object.keys(queueActions).join(", ")}`);
       }
     }
   }
@@ -106,7 +115,7 @@ export function compileProgram({ blueprint, bundles }: CompileInput): Program {
       }));
       const lambda = declareTier(tier, network, linked);
       if (tier.kind === "api") outputs.apiUrl = declareHttpApi(tier.name, lambda);
-      else declareEventSources(tier.name, lambda, tier.sizing as LambdaWorkerSizing, linked);
+      else declareEventSources(tier.name, lambda, tier.sizing, linked);
     }
     return outputs;
   };
@@ -131,7 +140,7 @@ type Database = {
   secretArn: pulumi.Output<string>;
 };
 
-type Queue = { queue: aws.sqs.Queue };
+type Queue = aws.sqs.Queue;
 
 // A Postgres database name is letters, digits and underscores, starting
 // with a letter; the application name is free-form.
@@ -175,19 +184,19 @@ function declareRdsPostgres(name: string, sizing: RdsSizing, network: Network, a
 // sqs-standard means, not an intent.
 function declareSqsStandard(name: string, sizing: SqsSizing): Queue {
   const deadLetter = new aws.sqs.Queue(`${name}-dead-letter`, { messageRetentionSeconds: deadLetterRetentionDays * secondsPerDay });
-  const queue = new aws.sqs.Queue(name, {
+  return new aws.sqs.Queue(name, {
     visibilityTimeoutSeconds: sizing.visibilityTimeoutSeconds,
     messageRetentionSeconds: sizing.retentionDays * secondsPerDay,
     redrivePolicy: deadLetter.arn.apply((arn) => JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: deadLetterMaxReceiveCount })),
   });
-  return { queue };
 }
 
 type LinkedIntent = Link & { database?: Database; queue?: Queue };
 
 // The IAM statements a link grants its tier: exactly what the role needs,
 // per direction. A consume link also covers what the event source mapping
-// polls with, since the mapping runs under the function's role.
+// polls with, since the mapping runs under the function's role. Checked
+// before any resource is declared.
 const queueActions: Record<string, string[]> = {
   produce: ["sqs:SendMessage"],
   consume: ["sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"],
@@ -197,7 +206,7 @@ const queueActions: Record<string, string[]> = {
 // from its bundle. Attached to the VPC, with a group that may reach
 // anything outbound, only when a database is linked; a tier that only
 // talks to queues stays outside and pays nothing for the attachment.
-function declareTier(tier: Tier, network: Network, links: LinkedIntent[]): aws.lambda.Function {
+function declareTier(tier: DeployableTier, network: Network, links: LinkedIntent[]): aws.lambda.Function {
   const { name, sizing, bundle } = tier;
   const inVpc = links.some((link) => link.database !== undefined);
   const group = inVpc
@@ -243,15 +252,14 @@ function declareTier(tier: Tier, network: Network, links: LinkedIntent[]): aws.l
       variables[names.user] = database.instance.username;
       variables[names.passwordArn] = database.secretArn;
     } else if (queue) {
-      const actions = queueActions[linkRole];
-      if (!actions) throw new Error(`no IAM statements for the ${linkRole} role on a queue`);
+      const actions = queueActions[linkRole]!;
       new aws.iam.RolePolicy(`${name}-${to}`, {
         role: role.name,
-        policy: queue.queue.arn.apply((arn) => JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: actions, Resource: arn }] })),
+        policy: queue.arn.apply((arn) => JSON.stringify({ Version: "2012-10-17", Statement: [{ Effect: "Allow", Action: actions, Resource: arn }] })),
       });
       const names = queueLinkVariables(to);
-      variables[names.url] = queue.queue.url;
-      variables[names.arn] = queue.queue.arn;
+      variables[names.url] = queue.url;
+      variables[names.arn] = queue.arn;
     }
   }
 
@@ -302,7 +310,7 @@ function declareEventSources(name: string, lambda: aws.lambda.Function, sizing: 
   for (const { to, role, queue } of links) {
     if (!queue || role !== "consume") continue;
     new aws.lambda.EventSourceMapping(`${name}-${to}`, {
-      eventSourceArn: queue.queue.arn,
+      eventSourceArn: queue.arn,
       functionName: lambda.name,
       batchSize: sizing.batchSize,
       scalingConfig: { maximumConcurrency: sizing.maxConcurrency },

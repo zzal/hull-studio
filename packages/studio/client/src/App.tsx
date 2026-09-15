@@ -173,7 +173,7 @@ export function App() {
     <main className="studio">
       <header>
         <h1>{blueprint?.name ?? "Hull studio"}</h1>
-        {blueprint && <Header blueprint={blueprint} edit={edit} />}
+        {blueprint && <Header blueprint={blueprint} diagnostics={diagnostics} edit={edit} />}
       </header>
       <div className="notices">
         {diagnostics.length > 0 && <DiagnosticsBanner diagnostics={diagnostics} />}
@@ -208,6 +208,7 @@ export function App() {
           <Inspector
             blueprint={blueprint}
             selection={selection}
+            diagnostics={diagnostics}
             environment={environment}
             estimate={estimate}
             recommendations={recommendations}

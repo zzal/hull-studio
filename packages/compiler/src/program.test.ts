@@ -369,6 +369,22 @@ describe("the program for the demo blueprint merged for dev", () => {
       for (const resource of own) expect(resourceOfType(resource.type), `${resource.type} of ${intent}`).not.toEqual([]);
     }
   });
+
+  // The one resource a tier declares conditionally: its security group,
+  // only while it links a database and is attached to the VPC.
+  it("declares every catalog resource but the security group for a worker linked only to a queue", async () => {
+    const queueOnly: Blueprint = {
+      ...demo,
+      intents: { ...demo.intents, worker: { ...demo.intents.worker!, links: [{ to: "jobs", role: "consume" }] } as Blueprint["intents"][string] },
+    };
+    const { declared: own } = await run(inputFor("dev", queueOnly));
+    const workerTypes = new Set(own.filter((resource) => resource.name === "worker" || resource.name.startsWith("worker-")).map((resource) => resource.type));
+
+    expect([...workerTypes].sort()).toEqual(
+      ["aws:cloudwatch/logGroup:LogGroup", "aws:iam/role:Role", "aws:iam/rolePolicy:RolePolicy", "aws:iam/rolePolicyAttachment:RolePolicyAttachment", "aws:lambda/eventSourceMapping:EventSourceMapping", "aws:lambda/function:Function"].sort(),
+    );
+    expect(resources["lambda-worker"].filter((resource) => resource !== "security group")).toEqual(["Lambda function", "log group", "execution role", "event source mapping"]);
+  });
 });
 
 describe("the program for a worker linked only to a queue", () => {
@@ -428,6 +444,15 @@ describe("compileProgram refusals", () => {
     expect(() => compileProgram(input)).toThrow(
       new CompileError("this version deploys one http-api intent; the blueprint has api, admin"),
     );
+  });
+
+  it("refuses a queue link role it has no statements for, before any resource is declared", () => {
+    const peeking: Blueprint = {
+      ...demo,
+      intents: { ...demo.intents, api: { ...demo.intents.api!, links: [{ to: "jobs", role: "peek" }] } as Blueprint["intents"][string] },
+    };
+
+    expect(() => compileProgram(inputFor("dev", peeking))).toThrow(new CompileError('intent "api" links to "jobs" with role peek, which this version does not deploy; queue roles are produce, consume'));
   });
 
   it("refuses a sizing override the resolution cannot take", () => {

@@ -113,6 +113,17 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
         return;
       }
       if (target.kind === "queue" && link.role === "consume") {
+        // Only a worker is fed by a queue: an API consuming one would get
+        // the permissions and no event source, a link that deploys and does
+        // nothing.
+        if (intent.kind !== "background-worker") {
+          const others = roles.filter((role) => role !== "consume");
+          diagnostics.push({
+            path: ["intents", name, "links", index, "role"],
+            message: `only a background-worker consumes a queue; "${name}" is ${/^[aeiou]/.test(intent.kind) || intent.kind === "http-api" ? "an" : "a"} ${intent.kind}, which may ${others.join(" or ")} to "${link.to}"`,
+          });
+          return;
+        }
         const first = consumers.get(link.to);
         if (first === undefined) consumers.set(link.to, name);
         else {

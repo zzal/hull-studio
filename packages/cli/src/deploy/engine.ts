@@ -45,6 +45,3 @@ export type ProviderAccount = {
   // access blocked, versioning on.
   ensureStateBucket(name: string, region: string): Promise<"created" | "existed">;
 };
-
-// Unused at runtime; keeps the event type in this module's exports.
-export type { ProgressEvent as EngineProgressEvent };

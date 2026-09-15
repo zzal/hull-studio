@@ -1,9 +1,9 @@
 import type { Blueprint } from "@hull/blueprint";
 import type { Refusal, UsageField } from "../../src/edits.js";
+import { money } from "../../src/format.js";
 import type { EstimateResponse } from "./api.js";
 import { EditableNumber } from "./EditableNumber.js";
 
-const money = (amount: number) => `$${amount.toFixed(2)}`;
 
 type Props = {
   blueprint: Blueprint;

@@ -107,30 +107,31 @@ ships its `hull.yaml`; `pnpm typecheck` there regenerates the bindings first
 (`pnpm bindings`), and `tests/todos-example.test.ts` bundles the entry and
 typechecks the example against them.
 
-`hull plan --env <name>` is the deploy pipeline stopped before any mutation
-of the environment. Pre-flight, before any cloud call: the Pulumi CLI is
-present, the blueprint is valid, every tier's entry file exists, and the
-passphrase is consistent with the state file. Then the AWS identity is
-resolved from the ambient profile, the state bucket
-`hull-state-<account>-<region>` is created if missing (region location
-constraint, public access blocked, versioning on) and recorded in
-`.hull/state.json`, which is committed so a second machine deploys against
-the same state, and the deploy secrets passphrase is generated on the first
-run into the gitignored `.hull/passphrase`; those two are the only things a
-plan may create, and every environment shares them. A missing passphrase on
-a repository whose state file already records a bucket is an error, never a
-silent regeneration; the passphrase in a repository folder is a PoC choice,
-KMS is the intended later secrets provider. The blueprint is then compiled,
-the bindings regenerated, each tier bundled, and the engine's preview
-rendered as one line per resource it would create, update or delete, the
-change counts, and the environment's expected monthly figure with and
-without free tier, from the estimate the studio serves.
+`hull plan --env <name>` is the deploy pipeline stopped before any mutation.
+Pre-flight, before any cloud call: the Pulumi CLI is present, the blueprint
+is valid, every tier's entry file exists, and the passphrase is consistent
+with the state file. Then the AWS identity is resolved from the ambient
+profile, the blueprint is compiled, the bindings regenerated, each tier
+bundled, and the engine's preview rendered as one line per resource it
+would create, update or delete, the change counts, and the environment's
+expected monthly figure with and without free tier, from the estimate the
+studio serves. On a directory never deployed from, the preview runs against
+an empty local state, which is what the first deploy would find; nothing is
+created, not even the state bucket.
 
 `hull deploy --env <name>` runs that plan, prints it with the figure, and
 asks to proceed; `--yes` answers for scripts, and a run without a terminal
-and without `--yes` is refused before any cloud call. Then the program runs
-through the deploy engine with one line per resource event and a summary,
-ending with the API URL. A queue becomes an SQS standard queue with a
+and without `--yes` is refused before any cloud call. On the first deploy
+the state bucket `hull-state-<account>-<region>` is created (region
+location constraint, public access blocked, versioning on) and recorded in
+`.hull/state.json`, which is committed so a second machine deploys against
+the same state, and the deploy secrets passphrase is generated into the
+gitignored `.hull/passphrase`. A missing passphrase on a repository whose
+state file already records a bucket is an error, never a silent
+regeneration; the passphrase in a repository folder is a PoC choice, KMS is
+the intended later secrets provider. Then the program runs through the
+deploy engine with one line per resource event and a summary, ending with
+the API URL. A queue becomes an SQS standard queue with a
 dead-letter queue (five receives, fourteen days); a worker becomes a Lambda
 fed by the queue it consumes through an event source mapping with the
 sizing's batch size and maximum concurrency and partial batch failures

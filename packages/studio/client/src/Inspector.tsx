@@ -1,4 +1,4 @@
-import { isTier, type Blueprint, type Op, type SizingValue } from "@hull/blueprint";
+import { isTier, type Blueprint, type Diagnostic, type Op, type SizingValue } from "@hull/blueprint";
 import type { Recommendation, SizingParameterFacts } from "@hull/catalog";
 import { useState } from "react";
 import {
@@ -11,13 +11,13 @@ import {
   resolutionEdit,
   type Refusal,
 } from "../../src/edits.js";
+import { money } from "../../src/format.js";
 import type { CatalogResponse, EstimateResponse, RecommendationsResponse } from "./api.js";
 import { EditableText } from "./EditableText.js";
 import { FieldDiagnostics } from "./FieldDiagnostics.js";
 import type { Selection } from "./Graph.js";
 import { useEdit } from "./useEdit.js";
 
-const money = (amount: number) => `$${amount.toFixed(2)}`;
 
 const dimensionLabels: Record<string, string> = {
   cost: "cost at this profile",
@@ -32,6 +32,8 @@ type Edit = (ops: Op[], path: Op["path"]) => Promise<Refusal>;
 type Props = {
   blueprint: Blueprint;
   selection: Selection;
+  // The file's own diagnostics, shown beside the field each concerns.
+  diagnostics: Diagnostic[];
   environment: string;
   estimate?: EstimateResponse;
   recommendations?: RecommendationsResponse;
@@ -40,6 +42,12 @@ type Props = {
   edit: Edit;
   onSelect: (selection: Selection | undefined) => void;
 };
+
+// The file's diagnostics at a path, as the refusal lines a field shows.
+export function diagnosticsAt(diagnostics: Diagnostic[], path: Op["path"]): string[] {
+  const key = path.join(".");
+  return diagnostics.filter((diagnostic) => diagnostic.path.join(".") === key).map((diagnostic) => diagnostic.message);
+}
 
 // Everything about the selected intent or link, editable in place: the
 // graph is where the blueprint is edited, not a picture.
@@ -83,7 +91,7 @@ function LinkInspector({ blueprint, selection, edit, onSelect }: Props & { selec
   );
 }
 
-function IntentInspector({ blueprint, selection, environment, estimate, recommendations, catalog, freeTier, edit, onSelect }: Props & { selection: Extract<Selection, { type: "intent" }> }) {
+function IntentInspector({ blueprint, selection, diagnostics, environment, estimate, recommendations, catalog, freeTier, edit, onSelect }: Props & { selection: Extract<Selection, { type: "intent" }> }) {
   const { name } = selection;
   const intent = blueprint.intents[name];
   if (!intent) return null;
@@ -111,10 +119,23 @@ function IntentInspector({ blueprint, selection, environment, estimate, recommen
           return result;
         }}
       />
+      <FieldDiagnostics refusal={diagnosticsAt(diagnostics, ["intents", name])} />
 
-      <ResolutionField intent={name} current={intent.resolution} candidates={candidates} recommendation={recommendation} edit={edit} />
+      <ResolutionField
+        intent={name}
+        current={intent.resolution}
+        candidates={candidates}
+        recommendation={recommendation}
+        fileDiagnostics={diagnosticsAt(diagnostics, ["intents", name, "resolution"])}
+        edit={edit}
+      />
 
-      {isTier(intent) && <EditableText label="entry" value={intent.entry} onCommit={(value) => edit([entryEdit(name, value)], ["intents", name, "entry"])} />}
+      {isTier(intent) && (
+        <>
+          <EditableText label="entry" value={intent.entry} onCommit={(value) => edit([entryEdit(name, value)], ["intents", name, "entry"])} />
+          <FieldDiagnostics refusal={diagnosticsAt(diagnostics, ["intents", name, "entry"])} />
+        </>
+      )}
 
       {isTier(intent) && (
         <div className="links">
@@ -126,6 +147,7 @@ function IntentInspector({ blueprint, selection, environment, estimate, recommen
                 <button type="button" className="quiet" onClick={() => onSelect({ type: "link", tier: name, index })}>
                   {link.role} → {link.to}
                 </button>
+                <FieldDiagnostics refusal={diagnostics.filter((d) => d.path.slice(0, 4).join(".") === ["intents", name, "links", index].join(".")).map((d) => d.message)} />
               </li>
             ))}
           </ul>
@@ -152,6 +174,7 @@ function IntentInspector({ blueprint, selection, environment, estimate, recommen
           environment={environment}
           sizing={estimated.sizing}
           parameters={candidates.find((candidate) => candidate.resolution === intent.resolution)?.sizingParameters ?? {}}
+          diagnostics={diagnostics}
           edit={edit}
         />
       )}
@@ -209,13 +232,14 @@ type ResolutionProps = {
   current: string;
   candidates: CatalogResponse["kinds"][keyof CatalogResponse["kinds"]]["candidates"];
   recommendation?: Recommendation;
+  fileDiagnostics: string[];
   edit: Edit;
 };
 
 // The resolution as a dropdown of the kind's candidates, with the
 // recommendation's ranked reasons inline. Proposed, never applied by the
 // catalog: the developer picks, and that changes the resolution line.
-function ResolutionField({ intent, current, candidates, recommendation, edit }: ResolutionProps) {
+function ResolutionField({ intent, current, candidates, recommendation, fileDiagnostics, edit }: ResolutionProps) {
   const { refusal, busy, submit } = useEdit((resolution: string) => edit([resolutionEdit(intent, resolution)], ["intents", intent, "resolution"]), current);
   const choose = (resolution: string) => {
     if (resolution !== current) void submit(resolution);
@@ -232,7 +256,7 @@ function ResolutionField({ intent, current, candidates, recommendation, edit }: 
             </option>
           ))}
         </select>
-        <FieldDiagnostics refusal={refusal} />
+        <FieldDiagnostics refusal={[...fileDiagnostics, ...refusal]} />
       </label>
       {recommendation && (
         <div className="recommendation">
@@ -256,6 +280,7 @@ function ResolutionField({ intent, current, candidates, recommendation, edit }: 
                       <dd>{candidate.reasons[dimension]}</dd>
                     </div>
                   ))}
+                  <CandidateResources facts={candidates.find((facts) => facts.resolution === candidate.resolution)} />
                 </dl>
               </li>
             ))}
@@ -266,18 +291,34 @@ function ResolutionField({ intent, current, candidates, recommendation, edit }: 
   );
 }
 
+// What a candidate deploys, from the catalog, and whether this version
+// deploys it at all: the comparison sits where the decision is made.
+function CandidateResources({ facts }: { facts?: CatalogResponse["kinds"][keyof CatalogResponse["kinds"]]["candidates"][number] }) {
+  if (!facts) return null;
+  return (
+    <div>
+      <dt>deploys</dt>
+      <dd>
+        {facts.resources.join(", ")}
+        {!facts.deployable && <em className="note"> (not deployable in this version)</em>}
+      </dd>
+    </div>
+  );
+}
+
 type SizingProps = {
   intent: string;
   environment: string;
   sizing: EstimateResponse["intents"][string]["sizing"];
   parameters: Record<string, SizingParameterFacts>;
+  diagnostics: Diagnostic[];
   edit: Edit;
 };
 
 // Every sizing value for the selected environment, editable: an edit writes
 // an override, shown as overridden beside the derived value; a reset removes
 // it and the mappings it leaves empty.
-function SizingSection({ intent, environment, sizing, parameters, edit }: SizingProps) {
+function SizingSection({ intent, environment, sizing, parameters, diagnostics, edit }: SizingProps) {
   return (
     <div className="sizing">
       <h3>Sizing for {environment}</h3>
@@ -288,6 +329,7 @@ function SizingSection({ intent, environment, sizing, parameters, edit }: Sizing
           value={value}
           source={source}
           facts={parameters[parameter]}
+          fileDiagnostics={diagnosticsAt(diagnostics, ["environments", environment, "overrides", intent, parameter])}
           onCommit={(next) => edit([overrideEdit(environment, intent, parameter, next)], ["environments", environment, "overrides", intent, parameter])}
           onReset={() => edit([resetOverrideEdit(environment, intent, parameter)], ["environments", environment, "overrides", intent, parameter])}
         />
@@ -301,11 +343,12 @@ type SizingFieldProps = {
   value: SizingValue;
   source: "derived" | "overridden";
   facts?: SizingParameterFacts;
+  fileDiagnostics: string[];
   onCommit: (value: SizingValue) => Promise<Refusal>;
   onReset: () => Promise<Refusal>;
 };
 
-function SizingField({ parameter, value, source, facts, onCommit, onReset }: SizingFieldProps) {
+function SizingField({ parameter, value, source, facts, fileDiagnostics, onCommit, onReset }: SizingFieldProps) {
   const [draft, setDraft] = useState(String(value));
   const { refusal, busy, submit, refuse } = useEdit(onCommit, value);
   const reset = useEdit(onReset, value);
@@ -358,7 +401,7 @@ function SizingField({ parameter, value, source, facts, onCommit, onReset }: Siz
           reset to derived
         </button>
       )}
-      <FieldDiagnostics refusal={[...refusal, ...reset.refusal]} />
+      <FieldDiagnostics refusal={[...fileDiagnostics, ...refusal, ...reset.refusal]} />
     </div>
   );
 }

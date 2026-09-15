@@ -33,3 +33,5 @@ export {
   type ProgressEvent,
 } from "./operations.js";
 export { estimateMerged, planEstimate, renderPlanEstimate } from "./estimate.js";
+export { money } from "./format.js";
+export { renderChanges, renderProgress } from "./progress.js";

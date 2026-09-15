@@ -1,5 +1,6 @@
 import { isTier, sizingValues, type MergedBlueprint, type MergedSizing, type UsageProfile } from "@hull/blueprint";
 import { estimateEnvironment, pricing, resolutionFacts, type Estimate, type IntentEstimate, type SizedIntent } from "@hull/catalog";
+import { money } from "./format.js";
 import type { PlanEstimate } from "./operations.js";
 
 // The estimate of a blueprint merged for one environment, as the studio
@@ -65,7 +66,6 @@ export function planEstimate(estimate: EstimateResponse): PlanEstimate {
   };
 }
 
-const money = (amount: number) => `$${amount.toFixed(2)}`;
 
 // The figure as one line, for the CLI and the dashboard alike.
 export function renderPlanEstimate(environment: string, estimate: PlanEstimate): string {

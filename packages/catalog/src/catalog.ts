@@ -48,6 +48,9 @@ type Resolution<S extends z.ZodObject> = {
   // The resources this resolution implies, in the provider's words; every
   // line item the meter produces names one of them.
   resources: readonly string[];
+  // The priced values of the parameters that name a SKU rather than a
+  // quantity, when the resolution has any.
+  choices?: (pricing: PricingSnapshot) => Record<string, string[]>;
 };
 
 function resolution<S extends z.ZodObject>(definition: Resolution<S>): Resolution<S> {
@@ -81,6 +84,7 @@ const resolutions = {
     derive: deriveRdsSizing,
     meter: rdsPostgresMeter,
     resources: resources["rds-postgres"],
+    choices: (pricing) => ({ instanceClass: Object.keys(pricing.rds.postgres.instanceHour) }),
   }),
   "sqs-standard": resolution({
     provider: "aws",
@@ -160,15 +164,9 @@ export type ResolutionFacts = {
   sizingParameters: Record<string, SizingParameterFacts>;
 };
 
-// The priced values of the parameters that name a SKU rather than a
-// quantity: only the RDS instance class in this version.
-function choicesOf(resolution: string, pricing: PricingSnapshot): Record<string, string[]> {
-  return resolution === "rds-postgres" ? { instanceClass: Object.keys(pricing.rds.postgres.instanceHour) } : {};
-}
-
 export function resolutionFacts(name: string, pricing: PricingSnapshot): ResolutionFacts {
-  const { kind, deployable, resources, sizing } = resolutionNamed(name);
-  const choices = choicesOf(name, pricing);
+  const { kind, deployable, resources, sizing, choices: choicesOf } = resolutionNamed(name);
+  const choices = choicesOf?.(pricing) ?? {};
   const sizingParameters = Object.fromEntries(
     Object.entries(sizing.shape).map(([parameter, schema]) => [
       parameter,

@@ -1,25 +1,40 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { account, directoryWithSample, fakeEngine, fakeProvider, passphraseFile, runHull, stateBucket, stateFile } from "./deploy/fakes.js";
+import { account, deployedDirectory, directoryWithSample, fakeEngine, fakeProvider, passphraseFile, runHull, stateBucket, stateFile } from "./deploy/fakes.js";
 
-// `hull plan --env dev`: the deploy pipeline stopped before any mutation of
-// the environment. Pre-flight as deploy, the engine's preview rendered as
-// one line per resource with its operation, the change counts, then the
-// environment's expected monthly figure with and without free tier, from
-// the estimate the studio serves. Never `up`.
+// `hull plan --env dev`: the deploy pipeline stopped before any mutation.
+// Pre-flight as deploy, the engine's preview rendered as one line per
+// resource with its operation, the change counts, then the environment's
+// expected monthly figure with and without free tier, from the estimate the
+// studio serves. Never `up`; and on a directory never deployed from, no
+// state bucket, no state file, no passphrase either.
 
 const runPlan = (directory: string, fakes?: Parameters<typeof runHull>[2]) => runHull(directory, "plan", fakes);
 
 describe("hull plan --env dev", () => {
-  it("calls check and preview only, never up, on the environment's stack", async () => {
+  it("calls check and preview only, never up, and on a directory never deployed from previews against an empty local state", async () => {
     const directory = directoryWithSample();
+    const { calls, engine } = fakeEngine();
+    const { calls: providerCalls, provider } = fakeProvider();
+
+    await runPlan(directory, { engine, provider });
+
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview"]);
+    expect(calls[1]!.target).toMatchObject({ project: "todos", stack: "dev", backendUrl: expect.stringMatching(/^file:\/\//) });
+    expect(typeof calls[1]!.program).toBe("function");
+    // Nothing of the account or the directory changes: no bucket, no state file, no passphrase.
+    expect(providerCalls).toEqual([{ method: "identity", args: ["us-east-1"] }]);
+    expect(existsSync(stateFile(directory))).toBe(false);
+    expect(existsSync(passphraseFile(directory))).toBe(false);
+  });
+
+  it("previews against the recorded state bucket once the directory was deployed from", async () => {
+    const directory = deployedDirectory();
     const { calls, engine } = fakeEngine();
 
     await runPlan(directory, { engine });
 
-    expect(calls.map((call) => call.method)).toEqual(["check", "preview"]);
-    expect(calls[1]!.target).toMatchObject({ project: "todos", stack: "dev", backendUrl: `s3://${stateBucket}?region=us-east-1` });
-    expect(typeof calls[1]!.program).toBe("function");
+    expect(calls[1]!.target).toMatchObject({ project: "todos", stack: "dev", backendUrl: `s3://${stateBucket}?region=us-east-1`, passphrase: "p".repeat(43) });
   });
 
   it("renders the resource lines, the change counts and the figure for the sample's dev environment", async () => {
@@ -39,8 +54,7 @@ describe("hull plan --env dev", () => {
 
     expect(lines).toEqual([
       `Planning todos dev in us-east-1 (account ${account}, profile sandbox).`,
-      `Created the state bucket ${stateBucket} and recorded it in .hull/state.json; commit that file.`,
-      "Generated the deploy secrets passphrase in .hull/passphrase; keep it, it unlocks this environment's state.",
+      "Nothing was deployed from here yet; planning against an empty state.",
       "Wrote .hull/bindings/index.ts.",
       "Plan for todos dev:",
       "  create   aws:ec2/securityGroup:SecurityGroup  db",
@@ -51,8 +65,6 @@ describe("hull plan --env dev", () => {
       "Expected monthly figure for dev: $14.58 (low $14.46, high $15.12), or $14.48 with always-free allowances only.",
       "Nothing was created; run `hull deploy --env dev` to proceed.",
     ]);
-    expect(existsSync(stateFile(directory))).toBe(true);
-    expect(readFileSync(passphraseFile(directory), "utf8")).toMatch(/^[A-Za-z0-9_-]{43}$/);
   });
 
   it("says when there is nothing to change", async () => {

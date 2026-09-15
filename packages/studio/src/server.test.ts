@@ -84,8 +84,8 @@ describe("GET /blueprint with a queue and a background worker", () => {
 
   it("refuses two tiers consuming the same queue, naming both", async () => {
     const twoConsumers = demoBlueprint.replace(
-      "      - to: jobs\n        role: produce\n",
-      "      - to: jobs\n        role: consume\n",
+      "  db:\n",
+      "  worker2:\n    kind: background-worker\n    resolution: lambda-worker\n    entry: src/worker2/index.ts\n    links:\n      - to: jobs\n        role: consume\n\n  db:\n",
     );
 
     const { body } = await readBlueprint(twoConsumers);
@@ -93,8 +93,21 @@ describe("GET /blueprint with a queue and a background worker", () => {
     expect(body.blueprint).toBeNull();
     expect(body.diagnostics).toEqual([
       {
-        path: ["intents", "worker", "links", 0, "role"],
-        message: 'queue "jobs" is consumed by both "api" and "worker"; a queue has at most one consuming tier',
+        path: ["intents", "worker2", "links", 0, "role"],
+        message: 'queue "jobs" is consumed by both "worker" and "worker2"; a queue has at most one consuming tier',
+      },
+    ]);
+  });
+
+  it("refuses a consume link from a tier that is not a background worker", async () => {
+    const apiConsumes = demoBlueprint.replace("      - to: jobs\n        role: produce\n", "      - to: jobs\n        role: consume\n").replace("      - to: jobs\n        role: consume\n      - to: db", "      - to: db");
+
+    const { body } = await readBlueprint(apiConsumes);
+
+    expect(body.diagnostics).toEqual([
+      {
+        path: ["intents", "api", "links", 1, "role"],
+        message: 'only a background-worker consumes a queue; "api" is an http-api, which may produce to "jobs"',
       },
     ]);
   });

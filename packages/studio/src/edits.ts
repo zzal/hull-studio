@@ -1,4 +1,4 @@
-import { isTier, type Blueprint, type Intent, type IntentKind, type Op, type SizingValue, type UsageProfile } from "@hull/blueprint";
+import { isTier, tierKinds, type Blueprint, type Intent, type IntentKind, type Op, type SizingValue, type UsageProfile } from "@hull/blueprint";
 import type { ErrorResponse } from "./server.js";
 
 // The dashboard's edits as operations for PUT /blueprint: every act in the
@@ -82,7 +82,7 @@ function freeName(blueprint: Blueprint, kind: IntentKind): string {
 export function addIntentEdit(blueprint: Blueprint, kind: IntentKind, resolution: string): { name: string; op: Op } {
   const name = freeName(blueprint, kind);
   const value: Record<string, unknown> = { kind, resolution };
-  if (kind === "http-api" || kind === "background-worker") value.entry = `src/${name}/index.ts`;
+  if (tierKinds.includes(kind)) value.entry = `src/${name}/index.ts`;
   return { name, op: { op: "set", path: ["intents", name], value } };
 }
 
