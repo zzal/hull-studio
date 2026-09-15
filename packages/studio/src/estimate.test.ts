@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ErrorResponse, EstimateResponse } from "./index.js";
-import { get, sampleBlueprint } from "./testing.js";
+import { demoBlueprint, get, sampleBlueprint } from "./testing.js";
 
 // GET /estimate?environment=<name>: the blueprint merged for that environment
 // (usage profile, derived sizing with overrides marked), the monthly figures per
@@ -282,6 +282,168 @@ describe("GET /estimate for an HTTP API on fargate-load-balancer", () => {
     expect(body.total).toEqual({
       withoutFreeTier: { low: 39.82, expected: 39.82, high: 39.83 },
       withFreeTier: { low: 39.82, expected: 39.82, high: 39.83 },
+    });
+  });
+});
+
+describe("GET /estimate for the milestone 2 demo blueprint", () => {
+  // dev: 100,000 requests, 100,000 messages, 1 GB. api and db as in the
+  // sample's dev environment; the free tier pool is drawn in blueprint
+  // order (api, jobs, worker, db).
+  //
+  // jobs on sqs-standard, derived 60 s / 4 days, consumed by worker in
+  // batches of 10: three requests per message, the receive batched:
+  //   expected: 100,000 sends + 10,000 receives + 100,000 deletes =
+  //             0.21M x $0.40                                             -> $0.08
+  //   low: 0.105M x $0.40 = $0.042 -> $0.04; high: 0.42M -> $0.168 -> $0.17
+  //   with free tier: SQS's always-free million requests cover it         -> $0.00
+  //   the dead-letter queue bills nothing
+  //
+  // worker on lambda-worker, derived 512 MB / 30 s / batches of 10 /
+  // concurrency 2:
+  //   expected: 10,000 invocations x $0.20/M = $0.002, duration 100,000
+  //             messages x 0.1 s x 0.5 GB = 5,000 GB-s x $0.0000166667 =
+  //             $0.0833                                                    -> $0.09
+  //   low: 5,000 invocations $0.001 + 1,250 GB-s $0.0208                  -> $0.02
+  //   high: 20,000 invocations $0.004 + 30,000 GB-s $0.50                 -> $0.50
+  //   with free tier: what api left of Lambda's allowance covers it       -> $0.00
+  //
+  // totals: expected $0.2033 + $0.084 + $0.0853 + $14.38                  -> $14.75
+  //         low $0.0808 + $0.042 + $0.0218 + $14.38                        -> $14.52
+  //         high $0.74 + $0.168 + $0.504 + $14.38                          -> $15.79
+  //   with free tier: only the HTTP API and the database bill             -> $14.48
+  //   (low $14.43, high $14.58)
+  it("prices the queue's requests and the worker's invocations and duration in dev", async () => {
+    const { status, body } = await estimate(demoBlueprint, "dev");
+
+    expect(status).toBe(200);
+    expect(body.usage).toEqual({ requestsPerMonth: 100000, storageGb: 1, messagesPerMonth: 100000 });
+    expect(Object.keys(body.intents)).toEqual(["api", "jobs", "worker", "db"]);
+    expect(body.intents.jobs).toEqual({
+      resolution: "sqs-standard",
+      deployable: true,
+      sizing: {
+        visibilityTimeoutSeconds: { value: 60, source: "derived" },
+        retentionDays: { value: 4, source: "derived" },
+      },
+      withoutFreeTier: { low: 0.04, expected: 0.08, high: 0.17 },
+      withFreeTier: { low: 0, expected: 0, high: 0 },
+      resources: [
+        {
+          resource: "SQS queue",
+          withoutFreeTier: { low: 0.04, expected: 0.08, high: 0.17 },
+          withFreeTier: { low: 0, expected: 0, high: 0 },
+        },
+        { resource: "dead-letter queue", ...noCharge },
+      ],
+    });
+    expect(body.intents.worker).toEqual({
+      resolution: "lambda-worker",
+      deployable: true,
+      sizing: {
+        memoryMb: { value: 512, source: "derived" },
+        timeoutSeconds: { value: 30, source: "derived" },
+        batchSize: { value: 10, source: "derived" },
+        maxConcurrency: { value: 2, source: "derived" },
+      },
+      withoutFreeTier: { low: 0.02, expected: 0.09, high: 0.5 },
+      withFreeTier: { low: 0, expected: 0, high: 0 },
+      resources: [
+        {
+          resource: "Lambda function",
+          withoutFreeTier: { low: 0.02, expected: 0.09, high: 0.5 },
+          withFreeTier: { low: 0, expected: 0, high: 0 },
+        },
+        { resource: "log group", ...noCharge },
+        { resource: "execution role", ...noCharge },
+        { resource: "event source mapping", ...noCharge },
+      ],
+    });
+    expect(body.intents.api?.withoutFreeTier).toEqual({ low: 0.08, expected: 0.2, high: 0.74 });
+    expect(body.intents.db?.withoutFreeTier).toEqual({ low: 14.38, expected: 14.38, high: 14.38 });
+    expect(body.total).toEqual({
+      withoutFreeTier: { low: 14.52, expected: 14.75, high: 15.79 },
+      withFreeTier: { low: 14.43, expected: 14.48, high: 14.58 },
+    });
+  });
+
+  // prod: 2,000,000 requests and messages, db.t4g.small pinned, the
+  // worker's maxConcurrency pinned to 10. api $4.07 / $1.62 / $14.80
+  // (with free tier $2.20 / $1.00 / $7.93) and db $26.06 as in the sample.
+  //
+  // jobs: 2M + 0.2M + 2M = 4.2M requests x $0.40                          -> $1.68
+  //   low 2.1M -> $0.84; high 8.4M -> $3.36
+  //   with free tier, 1M free: 3.2M -> $1.28; low 1.1M -> $0.44;
+  //   high 7.4M -> $2.96
+  //
+  // worker, still the first message band (2M is under 5M):
+  //   expected: 200,000 invocations $0.04 + 2M x 0.1 s x 0.5 GB =
+  //             100,000 GB-s $1.6667                                       -> $1.71
+  //   low: 100,000 invocations $0.02 + 25,000 GB-s $0.4167                -> $0.44
+  //   high: 400,000 invocations $0.08 + 600,000 GB-s $10.00               -> $10.08
+  //   with free tier, after api: expected, api took the million requests
+  //   and 100,000 GB-s, so the invocations bill and the duration is within
+  //   the 300,000 GB-s left                                                -> $0.04
+  //   low: api took the million requests and 25,000 GB-s                   -> $0.02
+  //   high: api took everything                                            -> $10.08
+  //
+  // totals: expected $4.0667 + $1.68 + $1.7067 + $26.06                    -> $33.51
+  //         low $1.6167 + $0.84 + $0.4367 + $26.06                          -> $28.95
+  //         high $14.80 + $3.36 + $10.08 + $26.06                           -> $54.30
+  //   with free tier: $2.20 + $1.28 + $0.04 + $26.06                        -> $29.58
+  //   low $1.00 + $0.44 + $0.02 + $26.06 -> $27.52; high $7.9333 + $2.96 +
+  //   $10.08 + $26.06 -> $47.03
+  it("applies prod's usage profile and marks the worker's pinned concurrency as overridden", async () => {
+    const { status, body } = await estimate(demoBlueprint, "prod");
+
+    expect(status).toBe(200);
+    expect(body.usage).toEqual({ requestsPerMonth: 2000000, storageGb: 1, messagesPerMonth: 2000000 });
+    expect(body.intents.jobs?.withoutFreeTier).toEqual({ low: 0.84, expected: 1.68, high: 3.36 });
+    expect(body.intents.jobs?.withFreeTier).toEqual({ low: 0.44, expected: 1.28, high: 2.96 });
+    expect(body.intents.worker?.sizing).toEqual({
+      memoryMb: { value: 512, source: "derived" },
+      timeoutSeconds: { value: 30, source: "derived" },
+      batchSize: { value: 10, source: "derived" },
+      maxConcurrency: { value: 10, source: "overridden" },
+    });
+    expect(body.intents.worker?.withoutFreeTier).toEqual({ low: 0.44, expected: 1.71, high: 10.08 });
+    expect(body.intents.worker?.withFreeTier).toEqual({ low: 0.02, expected: 0.04, high: 10.08 });
+    expect(body.intents.worker?.resources[0]).toEqual({
+      resource: "Lambda function",
+      withoutFreeTier: { low: 0.44, expected: 1.71, high: 10.08 },
+      withFreeTier: { low: 0.02, expected: 0.04, high: 10.08 },
+    });
+    expect(body.total).toEqual({
+      withoutFreeTier: { low: 28.95, expected: 33.51, high: 54.3 },
+      withFreeTier: { low: 27.52, expected: 29.58, high: 47.03 },
+    });
+  });
+
+  // A queue nobody consumes: every message is received on its own, so the
+  // receives are not batched: 100,000 x 3 = 0.3M x $0.40 -> $0.12.
+  it("meters one receive per message when no tier consumes the queue", async () => {
+    const noConsumer = demoBlueprint.replace("      - to: jobs\n        role: consume\n", "");
+
+    const { body } = await estimate(noConsumer, "dev");
+
+    expect(body.intents.jobs?.withoutFreeTier.expected).toBe(0.12);
+    expect(body.intents.worker?.withoutFreeTier).toEqual({ low: 0, expected: 0, high: 0 });
+  });
+
+  it("sizes the queue and the worker up with a heavier message volume", async () => {
+    const heavy = demoBlueprint.replace("  messagesPerMonth: 100000", "  messagesPerMonth: 10000000");
+
+    const { body } = await estimate(heavy, "dev");
+
+    expect(body.intents.jobs?.sizing).toEqual({
+      visibilityTimeoutSeconds: { value: 120, source: "derived" },
+      retentionDays: { value: 7, source: "derived" },
+    });
+    expect(body.intents.worker?.sizing).toEqual({
+      memoryMb: { value: 1024, source: "derived" },
+      timeoutSeconds: { value: 60, source: "derived" },
+      batchSize: { value: 10, source: "derived" },
+      maxConcurrency: { value: 5, source: "derived" },
     });
   });
 });

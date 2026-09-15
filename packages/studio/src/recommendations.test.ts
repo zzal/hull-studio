@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ErrorResponse, RecommendationsResponse } from "./index.js";
-import { get, sampleBlueprint, studioDirectoryOver } from "./testing.js";
+import { demoBlueprint, get, sampleBlueprint, studioDirectoryOver } from "./testing.js";
 
 // GET /recommendations?environment=<name>: for every intent whose kind has
 // more than one candidate resolution, the candidates ranked at that
@@ -29,6 +29,7 @@ describe("GET /recommendations for the sample blueprint's dev environment", () =
       intents: {
         api: {
           kind: "http-api",
+          dimensions: ["cost", "opsBurden", "scalingCeiling", "coldStart"],
           current: "lambda-api-gateway",
           recommended: "lambda-api-gateway",
           ranking: [
@@ -56,6 +57,62 @@ describe("GET /recommendations for the sample blueprint's dev environment", () =
         },
       },
     });
+  });
+});
+
+describe("GET /recommendations for the background worker", () => {
+  // The demo blueprint's dev environment, 100,000 messages a month:
+  // lambda-worker expected $0.09 (10,000 invocations and 5,000 GB-s);
+  // fargate-worker one always-on task of 256 CPU units / 512 MB, $9.01.
+  it("ranks lambda-worker first with a reason per dimension, job duration naming the 15-minute ceiling", async () => {
+    const { status, body } = await recommendations(demoBlueprint, "dev");
+
+    expect(status).toBe(200);
+    expect(Object.keys(body.intents)).toEqual(["api", "worker"]);
+    expect(body.intents.worker).toEqual({
+      kind: "background-worker",
+      dimensions: ["cost", "opsBurden", "scalingCeiling", "jobDuration"],
+      current: "lambda-worker",
+      recommended: "lambda-worker",
+      ranking: [
+        {
+          resolution: "lambda-worker",
+          expectedMonthly: 0.09,
+          reasons: {
+            cost: "$0.09 a month expected at 100,000 messages without free tier, the cheapest at this profile",
+            opsBurden: "no servers, images or polling loop to run; the queue triggers the function and AWS patches the runtime",
+            scalingCeiling: "scales to the sizing's maximum concurrency, within the account's concurrency quota (1,000 by default); beyond that the queue backs up",
+            jobDuration: "a job must finish within the sizing's timeout, and never past Lambda's 15-minute ceiling; longer work has to be split",
+          },
+        },
+        {
+          resolution: "fargate-worker",
+          expectedMonthly: 9.01,
+          reasons: {
+            cost: "$9.01 a month expected at 100,000 messages without free tier, $8.92 more than lambda-worker",
+            opsBurden: "a container image to build and patch, a cluster, a polling loop and a scaling policy to keep",
+            scalingCeiling: "no per-message ceiling; capacity is the task count, raised by a scaling policy",
+            jobDuration: "a job runs as long as the task does; there is no 15-minute ceiling",
+          },
+        },
+      ],
+    });
+  });
+
+  // 20,000,000 messages a month, in the second band: the worker at 1024 MB
+  // handles 2M invocations ($0.40) and 2,000,000 GB-s ($33.33) -> $33.73;
+  // two Fargate tasks are $18.02. Fargate leads on cost and keeps its two
+  // fixed dimensions, so it is recommended.
+  it("ranks fargate-worker first once the messages outgrow the always-on tasks", async () => {
+    const heavy = demoBlueprint.replace("  messagesPerMonth: 100000", "  messagesPerMonth: 20000000");
+
+    const { body } = await recommendations(heavy, "dev");
+
+    expect(body.intents.worker?.recommended).toBe("fargate-worker");
+    expect(body.intents.worker?.ranking.map((r) => [r.resolution, r.expectedMonthly])).toEqual([
+      ["fargate-worker", 18.02],
+      ["lambda-worker", 33.73],
+    ]);
   });
 });
 

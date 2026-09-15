@@ -133,10 +133,16 @@ export function sqsStandardMeter(_sizing: SqsSizing): Meter {
   };
 }
 
+// Whether the tier being metered consumes a queue; a worker that consumes
+// nothing yet is invoked by nothing.
+function consumesQueue(context: MeterContext): boolean {
+  return context.intents[context.name]?.links?.some((link) => link.role === "consume") ?? false;
+}
+
 // One invocation per batch, and the duration of handling each message.
 export function lambdaWorkerMeter(sizing: LambdaWorkerSizing): Meter {
-  return (usage, scenario, pricing) => {
-    const messages = messagesPerMonth(usage) * scenario.loadFactor;
+  return (usage, scenario, pricing, context) => {
+    const messages = consumesQueue(context) ? messagesPerMonth(usage) * scenario.loadFactor : 0;
     const invocations = messages / sizing.batchSize;
     const gbSeconds = messages * (scenario.lambdaDurationMs / 1000) * (sizing.memoryMb / 1024);
     return [

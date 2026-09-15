@@ -54,15 +54,16 @@
   },
   "freeTier": {
     "label": "always-free allowances only",
-    "note": "Every account, on the free or the paid plan, gets the always-free monthly allowances; of the SKUs here only Lambda's requests and GB-seconds have one. The 12-month allowances (API Gateway requests, RDS instance hours and storage, load balancer hours and capacity units) closed to accounts opened on or after July 15, 2025, and the last accounts holding them aged out on July 15, 2026. The sign-up credits of new accounts (USD 100, up to 200) are not per-service allowances and are not modelled. Verification in packages/catalog/README.md.",
-    "verifiedAt": "2026-09-14",
+    "note": "Every account, on the free or the paid plan, gets the always-free monthly allowances; of the SKUs here only Lambda's requests and GB-seconds and SQS's requests have one. The 12-month allowances (API Gateway requests, RDS instance hours and storage, load balancer hours and capacity units) closed to accounts opened on or after July 15, 2025, and the last accounts holding them aged out on July 15, 2026. The sign-up credits of new accounts (USD 100, up to 200) are not per-service allowances and are not modelled. Verification in packages/catalog/README.md.",
+    "verifiedAt": "2026-09-15",
     "sources": [
       "https://aws.amazon.com/about-aws/whats-new/2025/07/aws-free-tier-credits-month-free-plan/",
       "https://docs.aws.amazon.com/awsaccountbilling/latest/aboutv2/free-tier.html",
       "https://aws.amazon.com/free/",
       "https://aws.amazon.com/free/terms/",
       "https://aws.amazon.com/free/free-tier-faqs/",
-      "https://aws.amazon.com/lambda/pricing/"
+      "https://aws.amazon.com/lambda/pricing/",
+      "https://aws.amazon.com/sqs/pricing/"
     ],
     "rdsEligibleInstanceClasses": [],
     "monthly": {
