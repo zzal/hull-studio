@@ -3,18 +3,15 @@ import { join } from "node:path";
 import {
   applyOps,
   blueprintFileName,
-  isTier,
   loadBlueprint,
   mergeEnvironment,
   opsSchema,
   PatchError,
-  sizingValues,
   type Blueprint,
   type Diagnostic,
   type IntentKind,
   type LoadResult,
   type MergedBlueprint,
-  type MergedSizing,
   type UsageProfile,
 } from "@hull/blueprint";
 import {
@@ -25,15 +22,12 @@ import {
   pricing,
   recommendForKind,
   recommendResolution,
-  resolutionFacts,
   vocabulary,
-  type Estimate,
-  type IntentEstimate,
   type Recommendation,
   type ResolutionFacts,
-  type SizedIntent,
 } from "@hull/catalog";
 import { Hono, type Context } from "hono";
+import { estimateMerged, sizedIntents } from "./estimate.js";
 import { createOperations, isOperationKind, operationKinds, type Operations } from "./operations.js";
 import { BlueprintExistsError, createBlueprint, isTemplateName, notATemplate, templateNames, templates } from "./templates.js";
 
@@ -48,18 +42,7 @@ export type StudioOptions = {
   operations?: Operations;
 };
 
-// GET /estimate?environment=<name>: the blueprint merged for that environment
-// and its monthly estimate, per intent, per resource each intent implies, and
-// in total.
-export type EstimateResponse = {
-  environment: string;
-  usage: UsageProfile;
-  // How the free tier figures should be read until the pricing ticket
-  // verifies the current rules.
-  freeTierLabel: string;
-  intents: Record<string, { resolution: string; deployable: boolean; sizing: MergedSizing } & IntentEstimate>;
-  total: Estimate;
-};
+export type { EstimateResponse } from "./estimate.js";
 
 // GET /recommendations?environment=<name>: for every intent whose kind has
 // more than one candidate resolution, the candidates ranked at that
@@ -223,40 +206,13 @@ export function createStudioServer({ directory, onWrite, operations = createOper
     throw error;
   }
 
-  function sizedIntents(merged: MergedBlueprint): Record<string, SizedIntent> {
-    return Object.fromEntries(
-      Object.entries(merged.intents).map(([name, intent]) => [
-        name,
-        { resolution: intent.resolution, sizing: sizingValues(intent.sizing), ...(isTier(intent) && intent.links && { links: intent.links }) },
-      ]),
-    );
-  }
-
   app.get("/estimate", (c) => {
     const found = mergedFor(c);
     if ("response" in found) return found.response;
     const { merged } = found;
 
     try {
-      const estimated = estimateEnvironment(sizedIntents(merged), merged.usage, pricing);
-      const response: EstimateResponse = {
-        environment: merged.environment,
-        usage: merged.usage,
-        freeTierLabel: pricing.freeTier.label,
-        intents: Object.fromEntries(
-          Object.entries(merged.intents).map(([name, intent]) => [
-            name,
-            {
-              resolution: intent.resolution,
-              deployable: resolutionFacts(intent.resolution, pricing).deployable,
-              sizing: intent.sizing,
-              ...estimated.intents[name]!,
-            },
-          ]),
-        ),
-        total: estimated.total,
-      };
-      return c.json(response);
+      return c.json(estimateMerged(merged));
     } catch (error) {
       return catalogResponse(c, error);
     }

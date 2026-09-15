@@ -1,7 +1,7 @@
 import type { Program } from "@hull/compiler";
-import type { ProgressEvent } from "./progress.js";
+import type { OnProgress, ProgressEvent } from "@hull/studio";
 
-export type { ProgressEvent } from "./progress.js";
+export type { OnProgress, ProgressEvent } from "@hull/studio";
 
 // One environment's stack on the backend in the developer's account.
 export type StackTarget = {
@@ -15,15 +15,19 @@ export type StackTarget = {
   passphrase: string;
 };
 
-export type OnProgress = (event: ProgressEvent) => void;
+// What a preview would do, by operation: create, update, delete, same...
+export type PreviewResult = { changes: Record<string, number> };
 
-// The deploy engine (ADR 0004): what `hull deploy` and `hull destroy` need
-// from Pulumi, small enough to fake in tests. Settled by the milestone's
-// second spike.
+// The deploy engine (ADR 0004): what `hull plan`, `hull deploy` and `hull
+// destroy` need from Pulumi, small enough to fake in tests. Settled by the
+// milestone 1 second spike; preview added for milestone 2.
 export type DeployEngine = {
   // Pre-flight: the engine can run at all. Throws a message that says what
   // to install when it cannot.
   check(): Promise<void>;
+  // What running the program on the stack would change, without changing
+  // it; the events are the ones `up` emits, with the operation planned.
+  preview(target: StackTarget, program: Program, onProgress: OnProgress): Promise<PreviewResult>;
   // Runs the inline program on the stack and returns the stack outputs as
   // plain values.
   up(target: StackTarget, program: Program, onProgress: OnProgress): Promise<Record<string, unknown>>;
@@ -41,3 +45,6 @@ export type ProviderAccount = {
   // access blocked, versioning on.
   ensureStateBucket(name: string, region: string): Promise<"created" | "existed">;
 };
+
+// Unused at runtime; keeps the event type in this module's exports.
+export type { ProgressEvent as EngineProgressEvent };

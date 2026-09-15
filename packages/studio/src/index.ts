@@ -32,3 +32,4 @@ export {
   type PlanOutcome,
   type ProgressEvent,
 } from "./operations.js";
+export { estimateMerged, planEstimate, renderPlanEstimate } from "./estimate.js";

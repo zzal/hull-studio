@@ -2,11 +2,12 @@ import { defineCommand } from "citty";
 import { deployCommand } from "./commands/deploy.js";
 import { destroyCommand } from "./commands/destroy.js";
 import { initCommand } from "./commands/init.js";
+import { planCommand } from "./commands/plan.js";
 import { studioCommand } from "./commands/studio.js";
 import type { CommandContext } from "./context.js";
 
 export type { CommandContext } from "./context.js";
-export type { DeployEngine, ProgressEvent, ProviderAccount, StackTarget } from "./deploy/engine.js";
+export type { DeployEngine, PreviewResult, ProgressEvent, ProviderAccount, StackTarget } from "./deploy/engine.js";
 
 // The `hull` command tree.
 export function createHull(context: CommandContext) {
@@ -18,6 +19,7 @@ export function createHull(context: CommandContext) {
     subCommands: {
       init: initCommand(context),
       studio: studioCommand(context),
+      plan: planCommand(context),
       deploy: deployCommand(context),
       destroy: destroyCommand(context),
     },

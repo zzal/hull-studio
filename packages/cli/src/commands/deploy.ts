@@ -1,20 +1,15 @@
-import { existsSync } from "node:fs";
-import { join, relative } from "node:path";
-import { blueprintFileName } from "@hull/blueprint";
-import { writeBindings } from "@hull/compiler/bindings";
 import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
 import { awsAccount } from "../deploy/aws-account.js";
-import { loadEnvironment, readLocalState, stackTarget } from "../deploy/environment.js";
-import { renderProgress, watchFailures } from "../deploy/progress.js";
+import { runDeploy } from "../deploy/operations.js";
+import { renderProgress } from "../deploy/progress.js";
 import { pulumiEngine } from "../deploy/pulumi-engine.js";
-import { generatePassphrase, passphraseFileName, stateBucketName, stateFileName, writeState } from "../deploy/state.js";
 
-export function deployCommand({ cwd, output, engine = pulumiEngine(), provider = awsAccount() }: CommandContext) {
+export function deployCommand({ cwd, output, confirm, engine = pulumiEngine(), provider = awsAccount() }: CommandContext) {
   return defineCommand({
     meta: {
       name: "deploy",
-      description: "Deploy the blueprint to an environment in your own AWS account",
+      description: "Deploy the blueprint to an environment in your own AWS account, after showing the plan and asking",
     },
     args: {
       env: {
@@ -22,64 +17,18 @@ export function deployCommand({ cwd, output, engine = pulumiEngine(), provider =
         description: "The environment to deploy, as named in hull.yaml",
         required: true,
       },
+      yes: {
+        type: "boolean",
+        description: "Deploy without asking, for scripts",
+        default: false,
+      },
     },
     async run({ args }) {
-      // Pre-flight, local checks first so nothing reaches the cloud until
-      // the blueprint could deploy: the engine, the blueprint, its entry
-      // files, the passphrase. Then the account.
-      await engine.check();
-      const environment = loadEnvironment(cwd, args.env);
-      const { blueprint, merged } = environment;
-      const entries = Object.entries(blueprint.intents).flatMap(([name, intent]) =>
-        intent.kind === "http-api" ? [{ name, entry: intent.entry }] : [],
-      );
-      for (const { name, entry } of entries) {
-        if (!existsSync(join(cwd, entry))) {
-          throw new Error(`no entry ${entry} for intent ${name}; ${blueprintFileName} points at a file that does not exist`);
-        }
-      }
-      const { recorded, passphrase: existingPassphrase } = readLocalState(cwd);
-      let passphrase = existingPassphrase;
-
-      const { account, profile } = await provider.identity(blueprint.region);
-      output(`Deploying ${blueprint.name} to ${args.env} in ${blueprint.region} (account ${account}, profile ${profile}).`);
-
-      const stateBucket = recorded?.stateBucket ?? stateBucketName(account, blueprint.region);
-      const bucket = await provider.ensureStateBucket(stateBucket, blueprint.region);
-      if (!recorded) writeState(cwd, { stateBucket });
-      output(
-        bucket === "created"
-          ? `Created the state bucket ${stateBucket} and recorded it in ${stateFileName}; commit that file.`
-          : `State bucket ${stateBucket}.`,
-      );
-      if (passphrase === undefined) {
-        passphrase = generatePassphrase(cwd);
-        output(`Generated the deploy secrets passphrase in ${passphraseFileName}; keep it, it unlocks this environment's state.`);
-      }
-
-      // Bindings first: the tier imports them, so the bundle carries the
-      // module this blueprint implies, not a stale or missing one. The
-      // compiler loads Pulumi's SDK; only deploy pays for it.
-      for (const written of writeBindings(cwd, blueprint)) output(`Wrote ${relative(cwd, written)}.`);
-      const { bundleEntry, compileProgram } = await import("@hull/compiler");
-      const bundles = Object.fromEntries(
-        await Promise.all(entries.map(async ({ name, entry }) => [name, await bundleEntry({ directory: cwd, entry })] as const)),
-      );
-      const program = compileProgram({ blueprint: merged, bundles });
-
-      // A failure mid-way leaves what was created in the environment's
-      // state; the report names the resources and what the provider said.
-      const progress = watchFailures((event) => output(renderProgress(event)));
-      const advice = `What was created is recorded in the environment's state: run \`hull deploy --env ${args.env}\` again to retry, or \`hull destroy --env ${args.env}\` to remove it.`;
-      const outputs = await engine.up(stackTarget(environment, stateBucket, passphrase), program, progress.onProgress).catch((error: unknown) => {
-        throw progress.report(`deploy of ${blueprint.name} ${args.env}`, error, advice);
-      });
-
-      const apiUrl = outputs.apiUrl;
-      if (typeof apiUrl === "string") {
-        output(`API URL: ${apiUrl}`);
-        output(`Try: curl ${apiUrl}/todos`);
-      }
+      // Refused before any cloud call: a deploy is never a surprise, so a
+      // run that cannot ask must say so up front.
+      const answer = args.yes ? async () => true : confirm;
+      if (!answer) throw new Error("hull deploy needs a terminal to confirm the plan; pass --yes to deploy without the question");
+      await runDeploy({ cwd, engine, provider, onProgress: (event) => output(renderProgress(event)) }, args.env, answer);
     },
   });
 }

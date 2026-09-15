@@ -45,6 +45,13 @@ export function pulumiEngine(): DeployEngine {
         throw new Error(`the Pulumi CLI is not usable (${cause}); ${installHint}`);
       }
     },
+    async preview(target, program, onProgress) {
+      const stack = await stackFor(target, program);
+      const result = await stack
+        .preview({ color: "never", onEvent: (event) => forward(event, onProgress) })
+        .catch((error: unknown) => Promise.reject(new Error(engineFailureMessage(error))));
+      return { changes: { ...result.changeSummary } };
+    },
     async up(target, program, onProgress) {
       const stack = await stackFor(target, program);
       const result = await stack

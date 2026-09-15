@@ -1,8 +1,10 @@
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runCommand } from "citty";
 import { afterEach, describe, expect, it } from "vitest";
+import type { Operation } from "@hull/studio";
+import { fakeEngine, fakeProvider } from "./deploy/fakes.js";
 import { createHull } from "./index.js";
 
 // Seam 2 from the milestone 1 spec: `hull studio` run in a temporary
@@ -43,9 +45,9 @@ function directoryWithSample() {
   return directory;
 }
 
-type Options = { args?: string[]; openBrowser?: (url: string) => Promise<void> };
+type Options = { args?: string[]; openBrowser?: (url: string) => Promise<void>; engine?: ReturnType<typeof fakeEngine>["engine"] };
 
-function runStudio(directory: string, { args = [], openBrowser }: Options = {}) {
+function runStudio(directory: string, { args = [], openBrowser, engine = fakeEngine().engine }: Options = {}) {
   const lines: string[] = [];
   const stop = new AbortController();
   let browserOpened: (url: string) => void = () => undefined;
@@ -59,6 +61,8 @@ function runStudio(directory: string, { args = [], openBrowser }: Options = {}) 
         await openBrowser?.(url);
       },
       signal: stop.signal,
+      engine,
+      provider: fakeProvider().provider,
     }),
     { rawArgs: ["studio", ...args] },
   );
@@ -105,6 +109,33 @@ describe("hull studio", () => {
     expect(bindings.split("\n")[0]).toMatch(/generated.*do not edit/i);
     expect(bindings).toContain("export const db");
     expect(bindings).toContain("connectionString()");
+  });
+
+  // The studio runs plan, deploy and destroy through an operator the CLI
+  // builds from its own commands, against the same engine and account.
+  it("hands the studio an operator built from its own commands", async () => {
+    const directory = directoryWithSample();
+    mkdirSync(join(directory, "src", "api"), { recursive: true });
+    writeFileSync(join(directory, "src", "api", "index.ts"), "export const handler = async () => ({ statusCode: 200 });\n");
+    const { calls, engine } = fakeEngine({ previewChanges: { create: 12 } });
+    const { url } = runStudio(directory, { engine });
+    const opened = await url;
+
+    const started = await fetch(`${opened}/operations`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ kind: "plan", environment: "dev" }),
+    });
+    expect(started.status).toBe(202);
+    const finished = await waitFor(async () => {
+      const current = (await (await fetch(`${opened}/operations/current`)).json()) as Operation;
+      return current.status === "running" ? undefined : current;
+    });
+
+    expect(finished.status).toBe("succeeded");
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview"]);
+    expect(finished.outcome).toMatchObject({ changes: { create: 12 }, estimate: { expected: 14.58, withFreeTier: 14.48 } });
+    expect(finished.events.map((event) => (event.phase === "note" ? event.message : event.phase))).toContain("Changes: 12 to create.");
   });
 
   it("runs until the context's signal aborts, then stops serving", async () => {
@@ -160,3 +191,13 @@ describe("hull studio", () => {
     expect(readFileSync(join(directory, ".hull", "bindings", "index.ts"), "utf8")).toContain("export const db");
   });
 });
+
+// Polls until the probe answers, or fails after a few seconds.
+async function waitFor<T>(probe: () => Promise<T | undefined>): Promise<T> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const value = await probe();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("the operation did not end in time");
+}

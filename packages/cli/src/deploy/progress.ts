@@ -1,12 +1,9 @@
-// Hull's view of a deploy in progress, independent of the engine: one event
-// per resource operation phase and a final summary. The CLI renders them as
-// lines; the studio may later render them as a view.
-export type ProgressEvent =
-  | { phase: "started" | "done" | "failed"; operation: string; type: string; name: string }
-  // What the provider has to say about a failure or a concern, in its
-  // words, attributed to a resource when the engine knows which.
-  | { phase: "diagnostic"; severity: "warning" | "error"; name?: string; message: string }
-  | { phase: "summary"; changes: Record<string, number>; durationSeconds: number };
+import type { ProgressEvent } from "@hull/studio";
+
+// Hull's view of a deploy in progress, independent of the engine (the type
+// lives in the studio package so the dashboard renders the same events):
+// the CLI renders them as lines.
+export type { ProgressEvent };
 
 // Pulumi's operation names in the developer's words; unknown ones pass through.
 const changeWords: Record<string, string> = {
@@ -17,7 +14,17 @@ const changeWords: Record<string, string> = {
   replace: "replaced",
 };
 
+// The same, for what a plan would do.
+const plannedWords: Record<string, string> = {
+  create: "to create",
+  update: "to update",
+  delete: "to delete",
+  same: "unchanged",
+  replace: "to replace",
+};
+
 export function renderProgress(event: ProgressEvent): string {
+  if (event.phase === "note") return event.message;
   if (event.phase === "summary") {
     const changes = Object.entries(event.changes)
       .filter(([, count]) => count > 0)
@@ -25,7 +32,16 @@ export function renderProgress(event: ProgressEvent): string {
     return `Summary: ${changes.length > 0 ? changes.join(", ") : "no changes"} in ${duration(event.durationSeconds)}.`;
   }
   if (event.phase === "diagnostic") return `  ${event.severity}: ${event.message.trim()}`;
+  if (event.phase === "planned") return `  ${event.operation.padEnd(7)}  ${event.type}  ${event.name}`;
   return `  ${event.phase.padEnd(7)}  ${event.operation.padEnd(6)}  ${event.type}  ${event.name}`;
+}
+
+// The change counts of a preview as one line.
+export function renderChanges(changes: Record<string, number>): string {
+  const lines = Object.entries(changes)
+    .filter(([, count]) => count > 0)
+    .map(([operation, count]) => `${count} ${plannedWords[operation] ?? operation}`);
+  return `Changes: ${lines.length > 0 ? lines.join(", ") : "none"}.`;
 }
 
 function duration(seconds: number): string {

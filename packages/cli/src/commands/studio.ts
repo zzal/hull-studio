@@ -1,9 +1,21 @@
 import { writeBindings } from "@hull/compiler/bindings";
-import { startStudio } from "@hull/studio";
+import { startStudio, type Operator } from "@hull/studio";
 import { defineCommand } from "citty";
 import type { CommandContext } from "../context.js";
+import { awsAccount } from "../deploy/aws-account.js";
+import { runDeploy, runDestroy, runPlan } from "../deploy/operations.js";
+import { pulumiEngine } from "../deploy/pulumi-engine.js";
 
-export function studioCommand({ cwd, output, openBrowser, signal }: CommandContext) {
+export function studioCommand({ cwd, output, openBrowser, signal, engine = pulumiEngine(), provider = awsAccount() }: CommandContext) {
+  // The dashboard's plan, deploy and destroy, from the same functions the
+  // commands use, against the same engine and account. The dashboard asks
+  // its own confirmation before starting a deploy.
+  const operator: Operator = {
+    plan: (environment, onProgress) => runPlan({ cwd, engine, provider, onProgress }, environment),
+    deploy: (environment, onProgress) => runDeploy({ cwd, engine, provider, onProgress }, environment, async () => true),
+    destroy: (environment, onProgress) => runDestroy({ cwd, engine, provider, onProgress }, environment),
+  };
+
   return defineCommand({
     meta: {
       name: "studio",
@@ -23,7 +35,7 @@ export function studioCommand({ cwd, output, openBrowser, signal }: CommandConte
 
       // Every studio save regenerates the bindings, so the tier's typed
       // access to its linked intents always matches the file.
-      const studio = await startStudio({ directory: cwd, port, onWrite: (blueprint) => writeBindings(cwd, blueprint) });
+      const studio = await startStudio({ directory: cwd, port, onWrite: (blueprint) => writeBindings(cwd, blueprint), operator });
       try {
         output(`Studio at ${studio.url}`);
         output("Press Ctrl+C to stop.");

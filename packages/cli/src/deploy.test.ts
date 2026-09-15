@@ -7,6 +7,7 @@ import type { ProgressEvent } from "./deploy/engine.js";
 import {
   account,
   apiUrl,
+  demoBlueprint,
   directoryWithSample,
   fakeEngine,
   fakeProvider,
@@ -98,8 +99,9 @@ describe("hull deploy --env dev, first deploy", () => {
 
     await runDeploy(directory, { engine });
 
-    expect(calls.map((call) => call.method)).toEqual(["check", "up"]);
-    const up = calls[1]!;
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview", "up"]);
+    const up = calls[2]!;
+    expect(calls[1]!.target).toEqual(up.target);
     expect(up.target).toEqual({
       project: "todos",
       stack: "dev",
@@ -120,9 +122,15 @@ describe("hull deploy --env dev, first deploy", () => {
     expect(bindings).toContain("export const db");
   });
 
-  it("renders one line per resource event, the summary, and the API URL from the stack output", async () => {
+  it("shows the plan and the monthly figure, then renders one line per resource event, the summary, and the API URL", async () => {
     const directory = directoryWithSample();
     const { engine } = fakeEngine({
+      previewEvents: [
+        { phase: "done", operation: "create", type: "aws:ec2/securityGroup:SecurityGroup", name: "db" },
+        { phase: "done", operation: "create", type: "aws:rds/instance:Instance", name: "db" },
+        { phase: "done", operation: "same", type: "aws:cloudwatch/logGroup:LogGroup", name: "api" },
+      ],
+      previewChanges: { create: 2, same: 1 },
       upEvents: [
         { phase: "started", operation: "create", type: "aws:ec2/securityGroup:SecurityGroup", name: "db" },
         { phase: "done", operation: "create", type: "aws:ec2/securityGroup:SecurityGroup", name: "db" },
@@ -140,6 +148,11 @@ describe("hull deploy --env dev, first deploy", () => {
       `Created the state bucket ${stateBucket} and recorded it in .hull/state.json; commit that file.`,
       "Generated the deploy secrets passphrase in .hull/passphrase; keep it, it unlocks this environment's state.",
       "Wrote .hull/bindings/index.ts.",
+      "Plan for todos dev:",
+      "  create   aws:ec2/securityGroup:SecurityGroup  db",
+      "  create   aws:rds/instance:Instance  db",
+      "Changes: 2 to create, 1 unchanged.",
+      "Expected monthly figure for dev: $14.58 (low $14.46, high $15.12), or $14.48 with always-free allowances only.",
       "  started  create  aws:ec2/securityGroup:SecurityGroup  db",
       "  done     create  aws:ec2/securityGroup:SecurityGroup  db",
       "  started  create  aws:rds/instance:Instance  db",
@@ -149,6 +162,69 @@ describe("hull deploy --env dev, first deploy", () => {
       `API URL: ${apiUrl}`,
       `Try: curl ${apiUrl}/todos`,
     ]);
+  });
+});
+
+describe("hull deploy --env dev, the confirmation", () => {
+  it("shows the plan, asks, and never calls up when the answer is no", async () => {
+    const directory = directoryWithSample();
+    const { calls, engine } = fakeEngine({ previewChanges: { create: 14 } });
+    const questions: string[] = [];
+    const lines: string[] = [];
+
+    await expect(
+      runDeploy(directory, {
+        engine,
+        lines,
+        confirm: async (question) => {
+          questions.push(question);
+          return false;
+        },
+      }),
+    ).rejects.toThrow("deploy cancelled");
+
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview"]);
+    expect(questions).toEqual(["Proceed with the deploy of todos dev?"]);
+    expect(lines).toContain("Changes: 14 to create.");
+    expect(lines).toContain("Expected monthly figure for dev: $14.58 (low $14.46, high $15.12), or $14.48 with always-free allowances only.");
+  });
+
+  it("proceeds when the answer is yes", async () => {
+    const { calls, engine } = fakeEngine();
+
+    const lines = await runDeploy(directoryWithSample(), { engine, confirm: async () => true });
+
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview", "up"]);
+    expect(lines).toContain(`API URL: ${apiUrl}`);
+  });
+
+  it("never asks with --yes", async () => {
+    const { calls, engine } = fakeEngine();
+    let asked = false;
+
+    await runDeploy(directoryWithSample(), {
+      engine,
+      args: ["--env", "dev", "--yes"],
+      confirm: async () => {
+        asked = true;
+        return false;
+      },
+    });
+
+    expect(asked).toBe(false);
+    expect(calls.map((call) => call.method)).toEqual(["check", "preview", "up"]);
+  });
+
+  it("refuses a non-interactive run without --yes before the engine is called, naming the flag", async () => {
+    const engine = fakeEngine();
+    const provider = fakeProvider();
+
+    await expect(runDeploy(directoryWithSample(), { engine: engine.engine, provider: provider.provider, args: ["--env", "dev"] })).rejects.toThrow(
+      "hull deploy needs a terminal to confirm the plan; pass --yes to deploy without the question",
+    );
+
+    expect(engine.calls).toEqual([]);
+    expect(provider.calls).toEqual([]);
   });
 });
 
@@ -255,7 +331,7 @@ describe("hull deploy pre-flight", () => {
   });
 
   it("refuses an environment the blueprint does not declare", async () => {
-    await expect(runDeploy(directoryWithSample(), { args: ["--env", "staging"] })).rejects.toThrow(
+    await expect(runDeploy(directoryWithSample(), { args: ["--env", "staging", "--yes"] })).rejects.toThrow(
       'no environment "staging" in hull.yaml; environments are dev',
     );
   });
@@ -291,6 +367,18 @@ describe("hull deploy pre-flight", () => {
     await expect(runDeploy(directoryWithSample({ entry: false }), { engine: engine.engine, provider: provider.provider })).rejects.toThrow(
       "no entry src/api/index.ts for intent api; hull.yaml points at a file that does not exist",
     );
+
+    expect(provider.calls).toEqual([]);
+    expect(engine.calls.map((call) => call.method)).toEqual(["check"]);
+  });
+
+  it("reports a missing worker entry file and makes no cloud call", async () => {
+    const engine = fakeEngine();
+    const provider = fakeProvider();
+
+    await expect(
+      runDeploy(directoryWithSample({ blueprint: demoBlueprint, workerEntry: false }), { engine: engine.engine, provider: provider.provider }),
+    ).rejects.toThrow("no entry src/worker/index.ts for intent worker; hull.yaml points at a file that does not exist");
 
     expect(provider.calls).toEqual([]);
     expect(engine.calls.map((call) => call.method)).toEqual(["check"]);

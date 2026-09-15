@@ -34,16 +34,70 @@ environments:
   dev: {}
 `;
 
+// The milestone 2 plan's demo blueprint: the sample plus a queue produced by
+// the API and consumed by a worker that also reads the database, and a prod
+// environment with its own sizing.
+export const demoBlueprint = `name: todos
+provider: aws
+region: us-east-1
+usage:
+  requestsPerMonth: 100000
+  storageGb: 1
+  messagesPerMonth: 100000
+intents:
+  api:
+    kind: http-api
+    resolution: lambda-api-gateway
+    entry: src/api/index.ts
+    links:
+      - to: db
+        role: read-write
+      - to: jobs
+        role: produce
+  jobs:
+    kind: queue
+    resolution: sqs-standard
+  worker:
+    kind: background-worker
+    resolution: lambda-worker
+    entry: src/worker/index.ts
+    links:
+      - to: jobs
+        role: consume
+      - to: db
+        role: read-write
+  db:
+    kind: relational-database
+    resolution: rds-postgres
+environments:
+  dev: {}
+  prod:
+    usage:
+      requestsPerMonth: 2000000
+      messagesPerMonth: 2000000
+    overrides:
+      db:
+        instanceClass: db.t4g.small
+      worker:
+        maxConcurrency: 10
+`;
+
 export const account = "123456789012";
 export const stateBucket = `hull-state-${account}-us-east-1`;
 export const apiUrl = "https://abc.execute-api.us-east-1.amazonaws.com";
 
-export function directoryWithSample({ entry = true, blueprint = sampleBlueprint } = {}) {
+const handlerSource = "export const handler = async () => ({ statusCode: 200 });\n";
+
+export function directoryWithSample({ entry = true, blueprint = sampleBlueprint, workerEntry = true } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "hull-cli-"));
   writeFileSync(join(directory, "hull.yaml"), blueprint);
   if (entry) {
     mkdirSync(join(directory, "src", "api"), { recursive: true });
-    writeFileSync(join(directory, "src", "api", "index.ts"), "export const handler = async () => ({ statusCode: 200 });\n");
+    writeFileSync(join(directory, "src", "api", "index.ts"), handlerSource);
+  }
+  if (workerEntry && blueprint.includes("src/worker/index.ts")) {
+    mkdirSync(join(directory, "src", "worker"), { recursive: true });
+    writeFileSync(join(directory, "src", "worker", "index.ts"), handlerSource);
   }
   return directory;
 }
@@ -64,6 +118,9 @@ export function deployedDirectory(passphrase = "p".repeat(43)) {
 type EngineCall = { method: string; target?: StackTarget; program?: unknown };
 
 type FakeEngineOptions = {
+  // Played back by `preview`, with the change counts it then answers.
+  previewEvents?: ProgressEvent[];
+  previewChanges?: Record<string, number>;
   // Played back by `up`.
   upEvents?: ProgressEvent[];
   // Played back by `destroy`.
@@ -75,12 +132,25 @@ type FakeEngineOptions = {
   fails?: string;
 };
 
-export function fakeEngine({ upEvents = [], destroyEvents = [], outputs = { apiUrl }, cliMissing = false, fails }: FakeEngineOptions = {}) {
+export function fakeEngine({
+  previewEvents = [],
+  previewChanges = {},
+  upEvents = [],
+  destroyEvents = [],
+  outputs = { apiUrl },
+  cliMissing = false,
+  fails,
+}: FakeEngineOptions = {}) {
   const calls: EngineCall[] = [];
   const engine: DeployEngine = {
     async check() {
       calls.push({ method: "check" });
       if (cliMissing) throw new Error("the Pulumi CLI is not usable (not found in PATH); if it is missing, install it");
+    },
+    async preview(target, program, onEvent) {
+      calls.push({ method: "preview", target, program });
+      for (const event of previewEvents) onEvent(event);
+      return { changes: previewChanges };
     },
     async up(target, program, onEvent) {
       calls.push({ method: "up", target, program });
@@ -127,15 +197,18 @@ type Fakes = {
   args?: string[];
   // Receives the printed lines as they come, for a run expected to fail.
   lines?: string[];
+  // Answers the deploy confirmation; absent means a non-interactive run.
+  confirm?: (question: string) => Promise<boolean>;
 };
 
 // Runs one command in the directory against the fakes and returns what it
-// printed.
+// printed. A deploy passes --yes unless the test answers the question itself.
 export async function runHull(
   directory: string,
-  command: "deploy" | "destroy",
-  { engine = fakeEngine().engine, provider = fakeProvider().provider, args = ["--env", "dev"], lines = [] }: Fakes = {},
+  command: "deploy" | "destroy" | "plan",
+  { engine = fakeEngine().engine, provider = fakeProvider().provider, args, lines = [], confirm }: Fakes = {},
 ) {
+  const rawArgs = args ?? (command === "deploy" && !confirm ? ["--env", "dev", "--yes"] : ["--env", "dev"]);
   await runCommand(
     createHull({
       cwd: directory,
@@ -145,8 +218,9 @@ export async function runHull(
       },
       engine,
       provider,
+      confirm,
     }),
-    { rawArgs: [command, ...args] },
+    { rawArgs: [command, ...rawArgs] },
   );
   return lines;
 }

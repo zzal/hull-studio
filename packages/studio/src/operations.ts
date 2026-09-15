@@ -9,6 +9,8 @@
 // summary, and the notes the CLI prints as plain lines.
 export type ProgressEvent =
   | { phase: "started" | "done" | "failed"; operation: string; type: string; name: string }
+  // What a plan would do to a resource.
+  | { phase: "planned"; operation: string; type: string; name: string }
   // What the provider has to say about a failure or a concern, in its
   // words, attributed to a resource when the engine knows which.
   | { phase: "diagnostic"; severity: "warning" | "error"; name?: string; message: string }
