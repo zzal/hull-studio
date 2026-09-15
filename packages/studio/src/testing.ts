@@ -41,6 +41,59 @@ environments:
         instanceClass: db.t4g.small
 `;
 
+// The milestone 2 plan's demo blueprint: the sample plus a queue and a
+// background worker, in canonical form.
+export const demoBlueprint = `name: todos
+provider: aws
+region: us-east-1
+
+usage:
+  requestsPerMonth: 100000
+  storageGb: 1
+  messagesPerMonth: 100000
+
+intents:
+  api:
+    kind: http-api
+    resolution: lambda-api-gateway
+    entry: src/api/index.ts
+    links:
+      - to: db
+        role: read-write
+      - to: jobs
+        role: produce
+
+  jobs:
+    kind: queue
+    resolution: sqs-standard
+
+  worker:
+    kind: background-worker
+    resolution: lambda-worker
+    entry: src/worker/index.ts
+    links:
+      - to: jobs
+        role: consume
+      - to: db
+        role: read-write
+
+  db:
+    kind: relational-database
+    resolution: rds-postgres
+
+environments:
+  dev: {}
+  prod:
+    usage:
+      requestsPerMonth: 2000000
+      messagesPerMonth: 2000000
+    overrides:
+      db:
+        instanceClass: db.t4g.small
+      worker:
+        maxConcurrency: 10
+`;
+
 // A fresh temporary directory holding `text` as hull.yaml.
 export function blueprintDirectory(text: string) {
   const directory = mkdtempSync(join(tmpdir(), "hull-studio-"));

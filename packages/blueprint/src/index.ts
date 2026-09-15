@@ -10,6 +10,8 @@ export {
 } from "./merge.js";
 export {
   blueprintSchema,
+  isTier,
+  tierKinds,
   type Blueprint,
   type Environment,
   type Intent,
@@ -18,6 +20,7 @@ export {
   type Provider,
   type Role,
   type SizingValue,
+  type Tier,
   type UsageProfile,
 } from "./model.js";
 export { applyOps, opsSchema, PatchError, type Op } from "./patch.js";

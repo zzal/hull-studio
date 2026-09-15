@@ -21,6 +21,24 @@ function bandFor(usage: UsageProfile) {
   return requestBands.find((band) => usage.requestsPerMonth <= band.upToRequestsPerMonth) ?? heaviestBand;
 }
 
+// Message volume bands mirror the request bands. The low-end profile yields
+// the milestone 2 plan's numbers: 60 s / 4 days for the queue, 512 MB / 30 s /
+// batches of 10 / concurrency 2 for the worker. The queue's visibility
+// timeout stays at least twice the worker's timeout in every band, as the
+// event source mapping requires the first to cover the second.
+const messageBands = [
+  { upToMessagesPerMonth: 5_000_000, visibilityTimeoutSeconds: 60, retentionDays: 4, workerMemoryMb: 512, workerTimeoutSeconds: 30, batchSize: 10, maxConcurrency: 2, fargateCpu: 256, fargateMemoryMb: 512, fargateDesiredCount: 1 },
+  { upToMessagesPerMonth: 50_000_000, visibilityTimeoutSeconds: 120, retentionDays: 7, workerMemoryMb: 1024, workerTimeoutSeconds: 60, batchSize: 10, maxConcurrency: 5, fargateCpu: 256, fargateMemoryMb: 512, fargateDesiredCount: 2 },
+] as const;
+const heaviestMessageBand = { visibilityTimeoutSeconds: 300, retentionDays: 14, workerMemoryMb: 1024, workerTimeoutSeconds: 120, batchSize: 10, maxConcurrency: 10, fargateCpu: 512, fargateMemoryMb: 1024, fargateDesiredCount: 2 } as const;
+
+// An absent messagesPerMonth is zero: a milestone 1 blueprint has no queue.
+export const messagesPerMonth = (usage: UsageProfile) => usage.messagesPerMonth ?? 0;
+
+function messageBandFor(usage: UsageProfile) {
+  return messageBands.find((band) => messagesPerMonth(usage) <= band.upToMessagesPerMonth) ?? heaviestMessageBand;
+}
+
 const lambdaTimeoutSeconds = 10;
 
 // RDS storage is allocated, not used: round the profile's storage up to the
@@ -64,4 +82,34 @@ export function deriveRdsSizing(usage: UsageProfile): RdsSizing {
     storageGb: Math.max(rdsMinimumStorageGb, Math.ceil(usage.storageGb / rdsStorageStepGb) * rdsStorageStepGb),
     multiAz: false,
   };
+}
+
+export const sqsSizingSchema = z.object({
+  visibilityTimeoutSeconds: z.number().int().positive(),
+  retentionDays: z.number().int().positive(),
+});
+export type SqsSizing = z.infer<typeof sqsSizingSchema>;
+
+export function deriveSqsSizing(usage: UsageProfile): SqsSizing {
+  const band = messageBandFor(usage);
+  return { visibilityTimeoutSeconds: band.visibilityTimeoutSeconds, retentionDays: band.retentionDays };
+}
+
+export const lambdaWorkerSizingSchema = z.object({
+  memoryMb: z.number().int().positive(),
+  timeoutSeconds: z.number().int().positive(),
+  batchSize: z.number().int().positive(),
+  // The event source mapping's floor is two.
+  maxConcurrency: z.number().int().min(2),
+});
+export type LambdaWorkerSizing = z.infer<typeof lambdaWorkerSizingSchema>;
+
+export function deriveLambdaWorkerSizing(usage: UsageProfile): LambdaWorkerSizing {
+  const band = messageBandFor(usage);
+  return { memoryMb: band.workerMemoryMb, timeoutSeconds: band.workerTimeoutSeconds, batchSize: band.batchSize, maxConcurrency: band.maxConcurrency };
+}
+
+export function deriveFargateWorkerSizing(usage: UsageProfile): FargateSizing {
+  const band = messageBandFor(usage);
+  return { cpu: band.fargateCpu, memoryMb: band.fargateMemoryMb, desiredCount: band.fargateDesiredCount };
 }

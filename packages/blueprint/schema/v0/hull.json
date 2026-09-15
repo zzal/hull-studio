@@ -32,6 +32,12 @@
           "type": "number",
           "minimum": 0,
           "description": "Expected data stored, in gigabytes."
+        },
+        "messagesPerMonth": {
+          "description": "Expected messages sent to queues per month across the application; zero when absent.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
         }
       },
       "required": [
@@ -116,6 +122,74 @@
               "resolution"
             ],
             "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "queue"
+              },
+              "resolution": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The concrete kind of cloud resources chosen for this intent on the provider."
+              }
+            },
+            "required": [
+              "kind",
+              "resolution"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "background-worker"
+              },
+              "resolution": {
+                "type": "string",
+                "minLength": 1,
+                "description": "The concrete kind of cloud resources chosen for this intent on the provider."
+              },
+              "entry": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Path of the tier's entry module, relative to the blueprint."
+              },
+              "links": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "to": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9_]*$",
+                      "description": "Name of the intent this tier is linked to."
+                    },
+                    "role": {
+                      "type": "string",
+                      "minLength": 1,
+                      "description": "How the tier uses the linked intent. Valid roles depend on the target intent's kind."
+                    }
+                  },
+                  "required": [
+                    "to",
+                    "role"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A directional link from this tier to an intent, carrying a role."
+                }
+              }
+            },
+            "required": [
+              "kind",
+              "resolution",
+              "entry"
+            ],
+            "additionalProperties": false
           }
         ],
         "description": "An intent: an architectural need, with the resolution chosen for it."
@@ -145,6 +219,12 @@
                 "type": "number",
                 "minimum": 0,
                 "description": "Expected data stored, in gigabytes."
+              },
+              "messagesPerMonth": {
+                "description": "Expected messages sent to queues per month across the application; zero when absent.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
               }
             },
             "additionalProperties": false

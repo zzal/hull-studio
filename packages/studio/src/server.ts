@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   applyOps,
   blueprintFileName,
+  isTier,
   loadBlueprint,
   mergeEnvironment,
   opsSchema,
@@ -21,9 +22,12 @@ import {
   estimateEnvironment,
   pricing,
   recommendResolution,
+  resolutionFacts,
   vocabulary,
   type Estimate,
+  type IntentEstimate,
   type Recommendation,
+  type SizedIntent,
 } from "@hull/catalog";
 import { Hono, type Context } from "hono";
 
@@ -37,14 +41,15 @@ export type StudioOptions = {
 };
 
 // GET /estimate?environment=<name>: the blueprint merged for that environment
-// and its monthly estimate.
+// and its monthly estimate, per intent, per resource each intent implies, and
+// in total.
 export type EstimateResponse = {
   environment: string;
   usage: UsageProfile;
   // How the free tier figures should be read until the pricing ticket
   // verifies the current rules.
   freeTierLabel: string;
-  intents: Record<string, { resolution: string; sizing: MergedSizing } & Estimate>;
+  intents: Record<string, { resolution: string; deployable: boolean; sizing: MergedSizing } & IntentEstimate>;
   total: Estimate;
 };
 
@@ -144,11 +149,11 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
     throw error;
   }
 
-  function sizedIntents(merged: MergedBlueprint) {
+  function sizedIntents(merged: MergedBlueprint): Record<string, SizedIntent> {
     return Object.fromEntries(
       Object.entries(merged.intents).map(([name, intent]) => [
         name,
-        { resolution: intent.resolution, sizing: sizingValues(intent.sizing) },
+        { resolution: intent.resolution, sizing: sizingValues(intent.sizing), ...(isTier(intent) && intent.links && { links: intent.links }) },
       ]),
     );
   }
@@ -167,7 +172,12 @@ export function createStudioServer({ directory, onWrite }: StudioOptions) {
         intents: Object.fromEntries(
           Object.entries(merged.intents).map(([name, intent]) => [
             name,
-            { resolution: intent.resolution, sizing: intent.sizing, ...estimated.intents[name]! },
+            {
+              resolution: intent.resolution,
+              deployable: resolutionFacts(intent.resolution).deployable,
+              sizing: intent.sizing,
+              ...estimated.intents[name]!,
+            },
           ]),
         ),
         total: estimated.total,

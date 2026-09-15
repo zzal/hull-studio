@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { pricing } from "./pricing.js";
 import { offerUrl, refreshPrices, skuCount, type OfferFile, type OfferFiles } from "./refresh.js";
 
-// The pricing refresh, below the network: given the six offer files of the
+// The pricing refresh, below the network: given the seven offer files of the
 // AWS Price List Bulk API for one region, the snapshot's prices come from
-// exactly the SKUs the three resolutions use, and the free tier rules are
+// exactly the SKUs the six resolutions use, and the free tier rules are
 // carried over from the snapshot on disk, never from the API. The fixtures
 // are shaped like the real files, decoys included.
 
@@ -83,14 +83,20 @@ function offers(): OfferFiles {
       { family: "Load Balancer-Application", attributes: { usagetype: "TS-LoadBalancerUsage" }, prices: [["0", "0.0050000000"]] },
       { family: "Load Balancer", attributes: { usagetype: "LoadBalancerUsage" }, prices: [["0", "0.0250000000"]] },
     ]),
+    AWSQueueService: offer("AWSQueueService", "2026-09-11T12:46:07Z", [
+      { family: "API Request", attributes: { group: "SQS-APIRequest-Tier1", usagetype: "Requests-RBP", queueType: "Standard" }, prices: [["0", "0.0000004000"], ["100000000000", "0.0000003000"]] },
+      // Decoys: FIFO and fair queues.
+      { family: "API Request", attributes: { group: "SQS-APIRequest-Tier1", usagetype: "Requests-FIFO-RBP", queueType: "FIFO (first-in, first-out)" }, prices: [["0", "0.0000005000"]] },
+      { family: "API Request", attributes: { group: "SQS-APIRequest-Tier1", usagetype: "Requests-Fair-RBP", queueType: "Fair" }, prices: [["0", "0.0000001000"]] },
+    ]),
   };
 }
 
 describe("refreshPrices", () => {
-  it("prices the snapshot from exactly the sixteen SKUs the three resolutions use", () => {
+  it("prices the snapshot from exactly the seventeen SKUs the six resolutions use", () => {
     const snapshot = refreshPrices(offers(), "us-east-1", pricing.freeTier);
 
-    expect(skuCount).toBe(16);
+    expect(skuCount).toBe(17);
     expect(snapshot).toMatchObject({
       provider: "aws",
       region: "us-east-1",
@@ -109,6 +115,7 @@ describe("refreshPrices", () => {
         },
       },
       secretsManager: { secretMonth: 0.4 },
+      sqs: { perMillionRequests: 0.4 },
       fargate: { vcpuHour: 0.04048, gbHour: 0.004445 },
       applicationLoadBalancer: { hour: 0.0225, lcuHour: 0.008 },
     });
@@ -120,7 +127,7 @@ describe("refreshPrices", () => {
 
     expect(first.publishedAt).toBe("2026-09-11T17:35:10Z");
     expect(first.source).toBe(
-      "AWS Price List Bulk API, current offer files for us-east-1: AWSLambda 20260911173510, AmazonApiGateway 20260911124408, AmazonRDS 20260911124502, AWSSecretsManager 20260911124610, AmazonECS 20260911124425, AWSELB 20260911124544",
+      "AWS Price List Bulk API, current offer files for us-east-1: AWSLambda 20260911173510, AmazonApiGateway 20260911124408, AmazonRDS 20260911124502, AWSSecretsManager 20260911124610, AmazonECS 20260911124425, AWSELB 20260911124544, AWSQueueService 20260911124607",
     );
     expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   });

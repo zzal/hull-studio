@@ -2,7 +2,7 @@
   "provider": "aws",
   "region": "us-east-1",
   "currency": "USD",
-  "source": "AWS Price List Bulk API, current offer files for us-east-1: AWSLambda 20260911173510, AmazonApiGateway 20260911124408, AmazonRDS 20260911124502, AWSSecretsManager 20260911124610, AmazonECS 20260911124425, AWSELB 20260911124544",
+  "source": "AWS Price List Bulk API, current offer files for us-east-1: AWSLambda 20260911173510, AmazonApiGateway 20260911124408, AmazonRDS 20260911124502, AWSSecretsManager 20260911124610, AmazonECS 20260911124425, AWSELB 20260911124544, AWSQueueService 20260911124607",
   "publishedAt": "2026-09-11T17:35:10Z",
   "hoursPerMonth": 730,
   "lambda": {
@@ -41,6 +41,9 @@
   "secretsManager": {
     "secretMonth": 0.4
   },
+  "sqs": {
+    "perMillionRequests": 0.4
+  },
   "fargate": {
     "vcpuHour": 0.04048,
     "gbHour": 0.004445
@@ -69,7 +72,8 @@
       "rdsInstanceHours": 0,
       "rdsStorageGbMonths": 0,
       "applicationLoadBalancerHours": 0,
-      "applicationLoadBalancerLcuHours": 0
+      "applicationLoadBalancerLcuHours": 0,
+      "sqsMillionRequests": 1
     }
   }
 }

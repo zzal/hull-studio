@@ -1,5 +1,5 @@
 import { parseDocument } from "yaml";
-import { blueprintSchema, type Blueprint } from "./model.js";
+import { blueprintSchema, isTier, type Blueprint } from "./model.js";
 import { sizingValueHasType, type Vocabulary } from "./vocabulary.js";
 
 // The blueprint's file name at the root of the application repository.
@@ -59,6 +59,14 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
   // Intents whose resolution is already reported; their overrides cannot be
   // checked against sizing parameters, and a second diagnostic would be noise.
   const unresolvable = new Set<string>();
+  // A kind a link can target is one that defines link roles; a tier defines
+  // none, so a tier never links to a tier (milestone 2 rule).
+  const linkableKinds = Object.entries(vocabulary.kinds)
+    .filter(([, { roles }]) => roles.length > 0)
+    .map(([kind]) => kind);
+  // The tier consuming each queue, so a second consumer is refused naming
+  // the first.
+  const consumers = new Map<string, string>();
 
   for (const [name, intent] of Object.entries(blueprint.intents)) {
     const candidates = Object.entries(vocabulary.resolutions)
@@ -77,7 +85,7 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
       });
     }
 
-    if (intent.kind !== "http-api") continue;
+    if (!isTier(intent)) continue;
     intent.links?.forEach((link, index) => {
       const target = blueprint.intents[link.to];
       if (!target) {
@@ -87,12 +95,30 @@ function checkVocabulary(blueprint: Blueprint, vocabulary: Vocabulary): Diagnost
         });
         return;
       }
+      if (!linkableKinds.includes(target.kind)) {
+        diagnostics.push({
+          path: ["intents", name, "links", index, "to"],
+          message: `"${link.to}" is of kind ${target.kind}, which a link cannot target; a link targets an intent of kind ${linkableKinds.join(", ")}`,
+        });
+        return;
+      }
       const roles = vocabulary.kinds[target.kind].roles;
       if (!roles.includes(link.role)) {
         diagnostics.push({
           path: ["intents", name, "links", index, "role"],
           message: notAmong(link.role, "link role", `kind ${target.kind}`, roles),
         });
+        return;
+      }
+      if (target.kind === "queue" && link.role === "consume") {
+        const first = consumers.get(link.to);
+        if (first === undefined) consumers.set(link.to, name);
+        else {
+          diagnostics.push({
+            path: ["intents", name, "links", index, "role"],
+            message: `queue "${link.to}" is consumed by both "${first}" and "${name}"; a queue has at most one consuming tier`,
+          });
+        }
       }
     });
   }

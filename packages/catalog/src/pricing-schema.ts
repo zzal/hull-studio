@@ -18,6 +18,7 @@ const freeTierAllowancesSchema = z.object({
   rdsStorageGbMonths: allowance,
   applicationLoadBalancerHours: allowance,
   applicationLoadBalancerLcuHours: allowance,
+  sqsMillionRequests: allowance,
 });
 export type FreeTierAllowances = z.infer<typeof freeTierAllowancesSchema>;
 export type FreeTierAllowance = keyof FreeTierAllowances;
@@ -51,6 +52,7 @@ export const pricingSnapshotSchema = z.object({
     }),
   }),
   secretsManager: z.object({ secretMonth: price }),
+  sqs: z.object({ perMillionRequests: price }),
   fargate: z.object({ vcpuHour: price, gbHour: price }),
   applicationLoadBalancer: z.object({ hour: price, lcuHour: price }),
   // Verified by hand against AWS's published rules (the package README

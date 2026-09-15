@@ -3,12 +3,12 @@ import type { FreeTier, PricingSnapshot } from "./pricing-schema.js";
 
 // The pricing refresh below the network: from the current offer files of the
 // AWS Price List Bulk API for one region, the prices of exactly the SKUs the
-// three v0 resolutions use. The free tier rules are verified by hand and
+// six v1 resolutions use. The free tier rules are verified by hand and
 // live in the snapshot on disk; a refresh carries them over untouched. Run
 // by scripts/refresh-pricing.ts; unit-tested on fixtures.
 
 // The offer code of each price list file the resolutions draw from.
-export const offerCodes = ["AWSLambda", "AmazonApiGateway", "AmazonRDS", "AWSSecretsManager", "AmazonECS", "AWSELB"] as const;
+export const offerCodes = ["AWSLambda", "AmazonApiGateway", "AmazonRDS", "AWSSecretsManager", "AmazonECS", "AWSELB", "AWSQueueService"] as const;
 export type OfferCode = (typeof offerCodes)[number];
 
 // The public offer file URL; no credentials needed. The host is fixed to
@@ -55,6 +55,8 @@ const lookups = {
   fargateGbHour: { offerCode: "AmazonECS", label: "Fargate Linux x86 GB hour", family: "Compute", match: usageType("Fargate-GB-Hours") },
   albHour: { offerCode: "AWSELB", label: "Application Load Balancer hour", family: "Load Balancer-Application", match: usageType("LoadBalancerUsage") },
   albLcuHour: { offerCode: "AWSELB", label: "Application Load Balancer capacity unit hour", family: "Load Balancer-Application", match: usageType("LCUUsage") },
+  // The standard queue's request SKU; FIFO and fair queues are their own.
+  sqsRequest: { offerCode: "AWSQueueService", label: "SQS standard queue request", family: "API Request", match: (a) => a.queueType === "Standard" && usageType("Requests-RBP")(a) },
 } satisfies Record<string, Lookup>;
 
 const rdsInstance = (instanceType: string, deployment: Deployment): Lookup => ({
@@ -98,6 +100,7 @@ export function refreshPrices(offers: OfferFiles, region: string, freeTier: Free
       },
     },
     secretsManager: { secretMonth: price(lookups.secret) },
+    sqs: { perMillionRequests: round(price(lookups.sqsRequest) * million) },
     fargate: { vcpuHour: price(lookups.fargateVcpuHour), gbHour: price(lookups.fargateGbHour) },
     applicationLoadBalancer: { hour: price(lookups.albHour), lcuHour: price(lookups.albLcuHour) },
     freeTier: structuredClone(freeTier),
