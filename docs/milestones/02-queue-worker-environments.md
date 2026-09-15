@@ -9,25 +9,39 @@ AWS only, still the todos example, still cheap to test.
 Prove the two things milestone 1 deliberately left out: a link that is not
 "read-write to a database" (produce and consume on a queue, with a tier on
 each side), and an environment other than `dev` deployed from the same
-blueprint. Along the way, the studio becomes a real editor: intents and
-links are added and removed from the dashboard, and per-environment
-overrides are edited there.
+blueprint. And make the studio the primary surface it was always meant to
+be: the first end-to-end run (2026-09-15) found a dashboard where
+selecting a node does nothing, two numbers and one dropdown are the whole
+editable surface, `hull init` is a step the studio could absorb, and
+deploying is a separate terminal ritual with no plan to review before
+costs start. This milestone fixes all four: a start screen, an inspector
+on every node and edge, the resources each intent implies with their
+estimate lines, adding and removing intents and links, per-environment
+overrides, and plan, deploy and destroy from the dashboard and the CLI
+alike, with a plan and the monthly figure shown before anything is
+created.
 
 The demo script this milestone must make true, on a clean account, twice
 in a row:
 
 ```bash
-hull init                     # the two intents and a link, as before
-hull studio                   # add a queue and a worker from the dashboard,
-                              # link api -> queue (produce), worker -> queue
-                              # (consume), worker -> db (read-write)
-hull deploy --env dev
+hull studio                   # empty folder: the start screen writes the
+                              # API + database template; then add a queue and
+                              # a worker, link api -> queue (produce),
+                              # worker -> queue (consume), worker -> db
+                              # (read-write); plan and deploy dev from the
+                              # dashboard, or from the terminal:
+hull plan --env dev           # what would be created, and the monthly figure
+hull deploy --env dev         # shows the plan, asks, then deploys
 curl -X POST https://<api>/todos -d '{"title":"Ship milestone 2"}'   # the API enqueues
 curl https://<api>/todos      # the worker has written the row to Postgres
 hull deploy --env prod        # same blueprint, bigger sizing, its own state
 hull destroy --env dev
 hull destroy --env prod
 ```
+
+`hull init` survives for scripts (`hull init --template api-database`);
+the dashboard path and the terminal path must both complete the demo.
 
 ## Blueprint additions
 
@@ -145,18 +159,70 @@ a new dimension, job duration (Lambda stops at 15 minutes).
 
 ## Studio v1
 
-- Adding and removing intents and links from the dashboard: a palette of
-  the four kinds, each added with its recommended resolution and a
-  generated name; a link drawn between a tier node and a queue or
-  database node, its role picked from what the target accepts; removing
-  either through the patch route, refused with diagnostics when the result
-  would be invalid.
-- Per-environment overrides: every sizing value in the estimate panel is
-  editable for the selected environment; an edit writes an override, shown
-  as overridden, and a reset removes it and the now-empty `overrides`
-  mapping with it.
-- A recommendation card on the worker node, like the API's.
-- The client stays a patch editor: it never touches the file.
+Milestone 1's dashboard is a viewer with two editable numbers. This
+milestone makes it the editor and the operator.
+
+- **Start screen.** `hull studio` in a folder without a blueprint starts
+  anyway and shows a start screen: a template (the API plus database that
+  `hull init` writes, or a blank blueprint with a name, the provider, a
+  region, no intents and a `dev` environment). Choosing one writes the
+  file, in canonical form, with the `.gitignore` entries, through the
+  server like every other change, and the dashboard loads. `hull init`
+  stays as the scripted path with `--template`.
+- **Inspector.** Selecting a node opens an inspector for that intent: its
+  name (a rename retargets every link to it in one patch), its kind, its
+  resolution as a dropdown of the kind's candidates with the
+  recommendation's reasons inline, the entry path for a tier, its links
+  with their roles and a remove action each, and its sizing for the
+  selected environment, each value marked derived or overridden. Selecting
+  an edge shows its role and a remove action. A header panel edits the
+  blueprint's name and region. Field diagnostics show in place.
+- **What this deploys.** The inspector lists the resources the resolution
+  implies (an RDS instance, its storage, a security group, the managed
+  master password secret) with each one's estimate line, low, expected and
+  high, with and without free tier. The estimate is explained, not
+  announced. The list is catalog data per resolution; the compiler's test
+  checks it against what the program actually declares.
+- **Adding and removing.** A palette of the four kinds; adding writes the
+  intent with its recommended resolution, a generated name, and a
+  placeholder entry for a tier. A link is drawn from a tier node to a
+  queue or database node, its role picked from what the target accepts,
+  as one patch. Removing an intent or a link goes through the patch route
+  and is refused with diagnostics when the result would be invalid.
+- **Overrides.** Every sizing value in the inspector is editable for the
+  selected environment; an edit writes an override, shown as overridden
+  beside the derived value, and a reset removes it and the now-empty
+  mappings with it.
+- **Operations.** Plan, deploy and destroy for the selected environment,
+  from the dashboard, with live progress. See the next section.
+- The client remains a patch editor over the server: it never touches
+  the file and never sees Pulumi.
+
+## Plan, deploy and destroy
+
+- `hull plan --env <name>` is the deploy pipeline stopped before any
+  mutation: pre-flight, then the engine's preview rendered as one line
+  per resource it would create, update or delete, the summary, then the
+  environment's expected monthly figure with and without free tier. It
+  needs credentials and changes nothing. The deploy engine interface
+  gains `preview`, implemented over the Automation API's preview, whose
+  events are the ones the engine already maps.
+- `hull deploy --env <name>` shows that plan and the figure and asks to
+  proceed. `--yes` answers for scripts; a non-interactive terminal
+  without it is refused in pre-flight, never a silent deploy.
+- The studio runs the same three operations for the selected environment:
+  a plan view; a deploy button that shows the plan and the figure, asks,
+  then streams progress, one row per resource, the summary and the API URL
+  at the end; a destroy button behind a confirmation naming the
+  environment. Progress travels over the WebSocket the dashboard already
+  has. One operation at a time, and edits are refused while one runs.
+- The package rule holds: the studio never knows Pulumi. The CLI hands the
+  studio server an operator (plan, deploy, destroy) built from the same
+  functions its own commands use, the way it hands the bindings writer
+  today. The studio's tests run it with a fake operator, as the CLI's run
+  with a fake engine.
+- The CLI still knows no cost model: the figure `hull plan` prints comes
+  from the estimate function the studio package already serves.
 
 ## Example
 
@@ -190,21 +256,33 @@ Exit: the ADR is written and the estimate knows the answer.
 
 Exit: the estimate route prices the demo blueprint for `dev` and `prod`.
 
-### Phase 2: studio
+### Phase 2: studio as the editor
 
-- Add and remove intents and links.
-- Edit overrides per environment.
-- Worker recommendation card.
+- Start screen and `hull init --template`.
+- Inspector for the selected intent or link, and the header panel.
+- What this deploys: resources per resolution as catalog data, with
+  their estimate lines, checked against the compiler.
+- Add and remove intents and links; overrides in the inspector; the
+  worker's recommendation.
 
-Exit: the demo blueprint can be built from `hull init` in the dashboard
-alone, and the file diff is exactly the added intents and links.
+Exit: the demo blueprint can be built from an empty folder in the
+dashboard alone, and the file diff is exactly the added intents and links.
 
-### Phase 3: compiler, bindings, deploy
+### Phase 3: compiler and bindings
 
 - Queue, dead-letter queue, worker, event source mapping, IAM per link,
   under the mock runtime.
 - Queue bindings on both sides; the example's worker.
-- `dev` and `prod` side by side; the demo script twice; the README.
+
+Exit: the demo blueprint compiles under the mock runtime and the example
+typechecks against its bindings.
+
+### Phase 4: plan, deploy, destroy, from both surfaces
+
+- `hull plan`, the confirmation in `hull deploy`, the engine's preview.
+- Operations from the studio with live progress.
+- `dev` and `prod` side by side; the demo script twice, dashboard path
+  and terminal path; the README.
 
 Exit: the full demo script runs twice in a row on a clean account.
 
@@ -233,6 +311,13 @@ Never leave either environment up overnight.
 - **Studio edits that pass through an invalid state.** Adding a link in two
   steps (pick target, pick role) must be one patch, or the file is refused
   midway.
+- **An operation and an edit at the same time.** A deploy compiles the
+  file as it was when it started; an edit during the run would make the
+  dashboard lie about what is deploying. Edits are refused while an
+  operation runs, and the file watcher's reload is deferred to its end.
+- **Credentials in the studio process.** The studio runs in the
+  developer's shell with the ambient profile, on localhost only, so the
+  operations have exactly the access the terminal has. Nothing is stored.
 
 ## Out of scope for this milestone
 
@@ -240,4 +325,6 @@ Scheduled job, storage, user directory, secrets, web frontend, the
 disaster recovery policy, `hull eject`, `hull dev`, raw-resource escape
 hatch, GCP, hosted studio, IDE extension, observed-usage costs, FIFO
 queues, fan-out (one message to many consumers), tier-to-tier links, KMS
-secrets provider, publishing the schema at a public URL.
+secrets provider, publishing the schema at a public URL, operation history
+kept across studio restarts, more than one operation at a time, editing
+resources directly (the raw-resource escape hatch, milestone 3).
